@@ -32,8 +32,8 @@ def E(kind, **kw):
 
 def pill(t, **k): return E("pill", text=t, **k)
 def tag(t, color="muted", **k): return E("tag", text=t, color=color, **k)
-def head(t, size=72, **k): return E("head", text=t, size=size, **k)
-def sub(t, size=44, **k): return E("sub", text=t, size=size, **k)
+def head(t, size=80, **k): return E("head", text=t, size=size, **k)
+def sub(t, size=48, **k): return E("sub", text=t, size=size, **k)
 def big(t, color="amber", size=190, **k): return E("big", text=t, color=color, size=size, **k)
 def count(to, fmt, color="amber", size=190, frm=0, **k):
     return E("big", text=None, to=to, frm=frm, fmt=fmt, color=color, size=size, **k)
@@ -271,7 +271,7 @@ SEGMENTS = [
       src="Nasdaq-100 peak 4,704.73 on 27 Mar 2000"),
     S("And no, Europe was not a safe place to hide. Telecom stocks were the European version of the bubble. The Euro Stoxx fifty lost @a about two thirds of its value from 2000 to 2003.",
       tag("EURO STOXX 50 · 2000 → 2003"),
-      big("−⅔", color="red", at="a"),
+      big("−66%", color="red", at="a"),
       sub("Europe crashed {r:just as hard}"),
       src="Euro Stoxx 50: ≈5,464 (Mar 2000) → ≈1,850 (Mar 2003)"),
     S("Germany had its own story. Deutsche Telekom was sold to ordinary families as the people's share. @a At the peak in March 2000, it traded above one hundred euros.",

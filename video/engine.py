@@ -226,7 +226,7 @@ def build_sprite(e, prog=1.0, now=None):
     if k == "gap":
         return Image.new("RGBA", (1, e.get("h", 30)), (0, 0, 0, 0))
     if k == "chips":
-        f = font("grotesk", 44, 600)
+        f = font("grotesk", 50, 600)
         items = e["items"]
         ws = [text_w(f, t) + 56 for t in items]
         rowsl, cur, curw = [], [], 0
@@ -242,7 +242,7 @@ def build_sprite(e, prog=1.0, now=None):
             x = (tot_w - (sum(w_ for _, w_ in r) + 20 * (len(r) - 1))) / 2
             y = ri * 92
             for t, w_ in r:
-                d.rounded_rectangle((x, y, x + w_, y + 76), radius=38, fill=C["panel"] + (255,),
+                d.rounded_rectangle((x, y, x + w_, y + 80), radius=40, fill=C["panel"] + (255,),
                                     outline=C["line"] + (255,), width=2)
                 d.text((x + 28, y + 12), t, font=f, fill=C["white"] + (255,))
                 if e.get("strike"):
@@ -268,28 +268,35 @@ def build_sprite(e, prog=1.0, now=None):
     raise ValueError(k)
 
 
-def rows_sprite(items, width=1180):
-    fk = font("grotesk", 44, 500)
-    fv = font("mono", 48, 800)
-    rh = 92
+def draw_check(d, x, y, s, col, w=6):
+    d.line([(x, y + s * 0.55), (x + s * 0.38, y + s * 0.9), (x + s, y + s * 0.12)], fill=col, width=w, joint="curve")
+
+
+def rows_sprite(items, width=1320):
+    fk = font("grotesk", 50, 500)
+    fv = font("mono", 54, 800)
+    rh = 102
     img = Image.new("RGBA", (width, rh * len(items)), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     for i, (key, val, col) in enumerate(items):
         y = i * rh
         d.rounded_rectangle((0, y + 6, width - 1, y + rh - 6), radius=14,
                             fill=C["panel"] + (235,), outline=C["line"] + (255,), width=2)
-        d.text((32, y + 22), key, font=fk, fill=C["soft"] + (255,))
+        d.text((36, y + 22), key, font=fk, fill=C["soft"] + (255,))
+        if val == "✓":
+            draw_check(d, width - 36 - 40, y + 30, 40, C.get(col, C["white"]) + (255,), 7)
+            continue
         vw = text_w(fv, val)
-        d.text((width - 32 - vw, y + 18), val, font=fv, fill=C.get(col, C["white"]) + (255,))
+        d.text((width - 36 - vw, y + 19), val, font=fv, fill=C.get(col, C["white"]) + (255,))
     return img
 
 
-def table_sprite(header, items, width=1240):
-    fk = font("grotesk", 42, 500)
-    fh = font("mono", 40, 800)
-    fv = font("mono", 46, 800)
+def table_sprite(header, items, width=1400):
+    fk = font("grotesk", 50, 500)
+    fh = font("mono", 46, 800)
+    fv = font("mono", 54, 800)
     cols = [0.0, 0.62, 0.84]
-    rh = 90
+    rh = 100
     img = Image.new("RGBA", (width, rh * (len(items) + 1) + 10), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     for j, htxt in enumerate(header):
@@ -309,25 +316,25 @@ def table_sprite(header, items, width=1240):
     return img
 
 
-def bars_sprite(items, maxv, prog=1.0, width=1300):
-    fl = font("grotesk", 40, 500)
-    fv = font("mono", 44, 800)
+def bars_sprite(items, maxv, prog=1.0, width=1580):
+    fl = font("grotesk", 46, 500)
+    fv = font("mono", 50, 800)
     maxv = maxv or max(v for _, v, _, _ in items) * 1.1
-    lab_w = 470
-    bar_w = width - lab_w - 210
-    rh = 84
+    lab_w = 630
+    bar_w = width - lab_w - 230
+    rh = 92
     img = Image.new("RGBA", (width, rh * len(items)), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     p = ease_out(prog)
     for i, (lab, v, disp, col) in enumerate(items):
         y = i * rh
-        d.text((lab_w - 24 - text_w(fl, lab), y + 18), lab, font=fl, fill=C["soft"] + (255,))
-        d.rounded_rectangle((lab_w, y + 22, lab_w + bar_w, y + rh - 22), radius=8, fill=C["panel"] + (255,))
+        d.text((lab_w - 26 - text_w(fl, lab), y + 18), lab, font=fl, fill=C["soft"] + (255,))
+        d.rounded_rectangle((lab_w, y + 24, lab_w + bar_w, y + rh - 24), radius=8, fill=C["panel"] + (255,))
         bw = max(8, bar_w * min(1, v / maxv) * p)
-        d.rounded_rectangle((lab_w, y + 22, lab_w + bw, y + rh - 22), radius=8, fill=C[col] + (255,))
+        d.rounded_rectangle((lab_w, y + 24, lab_w + bw, y + rh - 24), radius=8, fill=C[col] + (255,))
         if p > 0.3:
             a = int(255 * min(1, (p - 0.3) / 0.4))
-            d.text((lab_w + bw + 20, y + 15), disp, font=fv, fill=C[col if col != "slate" else "muted"] + (a,))
+            d.text((lab_w + bw + 20, y + 16), disp, font=fv, fill=C[col if col != "slate" else "muted"] + (a,))
     return img
 
 
@@ -369,9 +376,9 @@ def waffle_sprite(groups, prog=1.0):
 def options_sprite(e, now):
     # now = dict(t_since_show, revealed(bool), t_since_reveal)
     items = e["items"]
-    f = font("mono", 46, 800)
-    fl = font("mono", 40, 800)
-    ow, oh = 760, 84
+    f = font("mono", 52, 800)
+    fl = font("mono", 46, 800)
+    ow, oh = 860, 92
     countdown = e.get("countdown") and now is not None and not now.get("revealed")
     extra = 150 if e.get("countdown") else 0
     img = Image.new("RGBA", (ow, oh * len(items) + 20 * (len(items) - 1) + extra), (0, 0, 0, 0))
@@ -389,7 +396,7 @@ def options_sprite(e, now):
             d.rounded_rectangle((0, y, ow, y + oh), radius=12, fill=C["green"] + (a,))
             d.text((28, y + 14), "ABC"[i], font=fl, fill=(10, 30, 20, a))
             d.text((90, y + 12), t, font=f, fill=(10, 30, 20, a))
-            d.text((ow - 70, y + 12), "✓", font=font("grotesk", 50, 700), fill=(10, 30, 20, a))
+            draw_check(d, ow - 70, y + 24, 40, (10, 30, 20, a), 7)
         else:
             aa = int(a * (0.35 if dim else 1))
             d.rounded_rectangle((0, y, ow, y + oh), radius=12, fill=C["panel"] + (aa,),

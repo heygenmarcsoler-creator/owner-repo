@@ -281,10 +281,15 @@ def layout(s):
     sizes = [final_sprite(e).size for e in els]
     if not els:
         return []
-    total = sum(h for _, h in sizes) + SPACING * (len(els) - 1)
     region = E.CONTENT_BOTTOM - E.CONTENT_TOP
-    sp = SPACING if total <= region else max(8, SPACING - (total - region) / max(1, len(els) - 1))
-    total = sum(h for _, h in sizes) + sp * (len(els) - 1)
+    sp = SPACING
+
+    def tot(sp_):
+        return sum(h for _, h in sizes) + sum(pair_gap(els[k], els[k + 1], sp_) for k in range(len(els) - 1))
+    total = tot(sp)
+    if total > region:
+        sp = max(8, SPACING - (total - region) / max(1, len(els) - 1))
+        total = tot(sp)
     y = E.CONTENT_TOP + (region - total) / 2
     # keep a persisting first element where it was in the previous scene
     i = s["seg"]
@@ -296,10 +301,14 @@ def layout(s):
     if y < E.CONTENT_TOP - 30:
         print(f"WARNING segment {s['seg']} overflows by {E.CONTENT_TOP - y:.0f}px")
     out = []
-    for e, (w, h) in zip(els, sizes):
+    for k, (e, (w, h)) in enumerate(zip(els, sizes)):
         out.append((e, (E.W - w) / 2, y, w, h))
-        y += h + sp
+        y += h + (pair_gap(e, els[k + 1], sp) if k + 1 < len(els) else 0)
     return out
+
+
+def pair_gap(a, b, sp):
+    return 6 if a["kind"] == b["kind"] and a["kind"] in ("bars", "rows") else sp
 
 
 # ------------------------------------------------------------------ frame
