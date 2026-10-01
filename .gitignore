@@ -1,0 +1,6 @@
+__pycache__/
+video/build/
+video/output/*.mp4
+!video/output/preview_*.mp4
+.env
+*.pcm
