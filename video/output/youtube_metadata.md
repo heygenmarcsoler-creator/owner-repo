@@ -45,3 +45,9 @@ This video is for education only and is not financial advice. Past performance d
 ## Tags
 
 ai bubble, ai bubble 2026, msci world, msci world etf, dot com crash, dot com bubble, stock market crash, european investor, etf europe, vwce, ftse all world, msci acwi, equal weight etf, nvidia, magnificent 7, concentration risk, euro investing, index investing europe, passive investing, 60/40 portfolio europe, ecb ai bubble, euroindexlab
+
+## Thumbnails (A/B test)
+
+- `thumbnail.jpg`: "AI = 2000?" + −45% + crash line
+- `thumbnail_b.jpg`: "€10,000 → 13 YEARS" + "AI BUBBLE?"
+- `thumbnail_c.jpg`: "AI CRASH: WHO WINS?" sold €8,813 vs waited €46,032

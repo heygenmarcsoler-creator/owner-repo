@@ -10,6 +10,7 @@
 | `video/sphinx_align.py` | Alineación forzada palabra a palabra (PocketSphinx) para los subtítulos |
 | `video/music.py` | Música de fondo y efectos generados por código (sin derechos de terceros) |
 | `video/build.py` | Línea de tiempo (voz ×1,05, pausas recortadas) → mezcla con efectos → render 1080p30 con cámara, transiciones y barra de capítulos → MP4 |
+| `video/thumbnail.py` | 3 miniaturas para prueba A/B (1280×720) |
 | `video/metadata.py` | Título, descripción con capítulos, etiquetas y miniatura |
 | `video/assets/tts/` | Narración generada (FLAC), para no tener que regenerarla |
 
