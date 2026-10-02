@@ -775,7 +775,7 @@ SEGMENTS = [
       head("What would {a:you} do?"),
       boxes(["A", "B", "C"], at="a")),
     S("If you want to see how a crash right before retirement changes everything, watch my video where I simulated ten thousand European retirements. @a It's on my channel.",
-      card("FULL VIDEO", "The 4% Rule in Europe: I Simulated 10,000 Retirements", at="a")),
+      card("FULL VIDEO", "The 4% Rule in Europe: I Simulated 10,000 Retirements")),
     S("And if you want more real euro data instead of hype, subscribe. Every video on this channel is built on numbers you can check.",
       head("Real euro data. {a:No hype.}"),
       sub("Subscribe for the next simulation")),

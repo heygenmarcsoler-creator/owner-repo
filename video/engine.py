@@ -282,9 +282,12 @@ def rows_sprite(items, width=1320):
         y = i * rh
         d.rounded_rectangle((0, y + 6, width - 1, y + rh - 6), radius=14,
                             fill=C["panel"] + (235,), outline=C["line"] + (255,), width=2)
-        d.text((36, y + 22), key, font=fk, fill=C["soft"] + (255,))
+        d.text((36, y + 22), key, font=fv if len(key) <= 2 else fk, fill=C["soft"] + (255,))
         if val == "✓":
             draw_check(d, width - 36 - 40, y + 30, 40, C.get(col, C["white"]) + (255,), 7)
+            continue
+        if len(key) <= 2:  # numbered checklist: value left-aligned after the number
+            d.text((96, y + 22), val, font=fk, fill=C.get(col, C["white"]) + (255,))
             continue
         vw = text_w(fv, val)
         d.text((width - 36 - vw, y + 19), val, font=fv, fill=C.get(col, C["white"]) + (255,))
