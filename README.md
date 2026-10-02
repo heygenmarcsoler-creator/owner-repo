@@ -12,6 +12,7 @@
 | `video/build.py` | Línea de tiempo (voz ×1,05, pausas recortadas) → mezcla con efectos → render 1080p30 con cámara, transiciones y barra de capítulos → MP4 |
 | `video/shorts.py` | 5 Shorts verticales (1080×1920) con gancho nuevo, sacados del vídeo largo |
 | `video/thumbnail.py` | 3 miniaturas para prueba A/B (1280×720) |
+| `video/output/skool_posts.md` | 7 publicaciones para la comunidad de Skool (lanzamiento, encuesta y una por Short) con calendario |
 | `video/metadata.py` | Título, descripción con capítulos, etiquetas y miniatura |
 | `video/assets/tts/` | Narración generada (FLAC), para no tener que regenerarla |
 
