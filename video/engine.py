@@ -8,7 +8,8 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-W, H, FPS = 1920, 1080, 30
+VERTICAL = bool(os.environ.get("VERTICAL"))
+W, H, FPS = (1080, 1920, 30) if VERTICAL else (1920, 1080, 30)
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONT_DIR = os.environ.get("FONT_DIR", os.path.join(HERE, "fonts"))
 
@@ -19,8 +20,13 @@ C = {
     "panel": (17, 23, 35), "line": (34, 42, 58), "soft": (201, 207, 222),
 }
 
-CONTENT_TOP, CONTENT_BOTTOM = 70, 835
-SOURCE_Y, CAPTION_Y = 872, 952
+if VERTICAL:
+    CONTENT_TOP, CONTENT_BOTTOM = 180, 1220
+    SOURCE_Y, CAPTION_Y = 1262, 1350
+else:
+    CONTENT_TOP, CONTENT_BOTTOM = 70, 835
+    SOURCE_Y, CAPTION_Y = 872, 952
+TEXT_MAXW = W - 120
 
 
 # ------------------------------------------------------------------ fonts
@@ -213,9 +219,9 @@ def build_sprite(e, prog=1.0, now=None):
             x += text_w(f, ch) + sp
         return img
     if k == "head":
-        return rich_text(e["text"], e.get("size", 72), "grotesk", 700, "white", maxw=1600)
+        return rich_text(e["text"], e.get("size", 72), "grotesk", 700, "white", maxw=min(1600, TEXT_MAXW))
     if k == "sub":
-        return rich_text(e["text"], e.get("size", 44), "grotesk", 500, "soft", maxw=1500)
+        return rich_text(e["text"], e.get("size", 44), "grotesk", 500, "soft", maxw=min(1500, TEXT_MAXW))
     if k == "big":
         txt = e["text"] if e.get("text") else fmt_value(e, e["to"])
         img = rich_text(txt, e.get("size", 190), "mono", 800, e.get("color", "amber"), maxw=1800)
@@ -231,7 +237,7 @@ def build_sprite(e, prog=1.0, now=None):
         ws = [text_w(f, t) + 64 for t in items]
         rowsl, cur, curw = [], [], 0
         for t, w_ in zip(items, ws):
-            if cur and curw + w_ + 20 > 1500:
+            if cur and curw + w_ + 20 > min(1500, TEXT_MAXW):
                 rowsl.append(cur); cur, curw = [], 0
             cur.append((t, w_)); curw += w_ + 20
         rowsl.append(cur)
@@ -279,7 +285,8 @@ def draw_check(d, x, y, s, col, w=6):
     d.line([(x, y + s * 0.55), (x + s * 0.38, y + s * 0.9), (x + s, y + s * 0.12)], fill=col, width=w, joint="curve")
 
 
-def rows_sprite(items, width=1320):
+def rows_sprite(items, width=None):
+    width = width or min(1320, W - 60)
     fk = font("grotesk", 50, 500)
     fv = font("mono", 54, 800)
     rh = 102
@@ -479,7 +486,8 @@ def fmt_k(v):
     return f"€{v / 1000:.1f}k"
 
 
-def chart_sprite(e, prog=1.0, width=1400, height=None):
+def chart_sprite(e, prog=1.0, width=None, height=None):
+    width = width or min(1400, W - 30)
     height = e.get("h", 400)
     S = 2  # supersampling
     pad_l, pad_r, pad_t, pad_b = 150, 190, 30, 70
@@ -560,7 +568,7 @@ def chart_sprite(e, prog=1.0, width=1400, height=None):
 # ------------------------------------------------------------------ captions
 @lru_cache(maxsize=4096)
 def caption_sprite(words, active):
-    f = font("grotesk", 64, 600)
+    f = font("grotesk", 76 if VERTICAL else 64, 600)
     words = list(words)
     sp = text_w(f, " ")
     widths = [text_w(f, w) for w in words]

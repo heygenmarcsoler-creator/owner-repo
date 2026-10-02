@@ -325,8 +325,15 @@ SPACING = 34
 LAYOUT_Y = {}
 
 
+def fit(spr):
+    """Shrink sprites wider than the frame (vertical Shorts)."""
+    if spr is not None and spr.width > E.W - 60:
+        return scaled(spr, (E.W - 60) / spr.width)
+    return spr
+
+
 def final_sprite(e):
-    return E.sprite_cached(E.el_key(e))
+    return fit(E.sprite_cached(E.el_key(e)))
 
 
 def pair_gap(a, b, sp):
@@ -466,7 +473,7 @@ def content_layer(s, lay, t):
             if out_a <= 0:
                 continue
         since = t - t_app if t_app > -1e8 else 99.0
-        spr = dynamic_sprite(e, s, t, t_app) or final_sprite(e)
+        spr = fit(dynamic_sprite(e, s, t, t_app)) or final_sprite(e)
         cx, cy = x + w / 2, y + h / 2
         kind = e["kind"]
         a, sc, dx, dy = 1.0, 1.0, 0.0, 0.0
@@ -595,14 +602,15 @@ def render_frame(t, si, segs):
                     active = i
             cs = E.caption_sprite(tuple(w for w, _, _ in g), active)
             pop = E.ease_out_back((t - g_start + 0.05) / 0.14)
-            cs = scaled(cs, 0.85 + 0.15 * pop)
+            cs = scaled(cs, (0.85 + 0.15 * pop) * min(1.0, (E.W - 40) / cs.width))
             frame.paste(cs, ((E.W - cs.width) // 2, E.CAPTION_Y - cs.height // 2), cs)
             break
     # chapter tracker + segmented progress bar
-    k = chapter_index(t)
-    label = "INTRO" if k == 0 else f"{k:02d} · {CH[k - 1].upper()}"
-    tr = E.tracker_sprite(label)
-    frame.paste(tr, (40, 26), tr)
+    if not E.VERTICAL:
+        k = chapter_index(t)
+        label = "INTRO" if k == 0 else f"{k:02d} · {CH[k - 1].upper()}"
+        tr = E.tracker_sprite(label)
+        frame.paste(tr, (40, 26), tr)
     d = ImageDraw.Draw(frame)
     bounds = CH_BOUNDS + [TL["total"]]
     gap = 6

@@ -36,3 +36,15 @@ Tiempos sobre `video/output/video.mp4`. Gancho nuevo puntuado con `yt-script/hoo
 
 ## Encuadre vertical
 Los gráficos del vídeo están centrados en 16:9 y miden hasta ~1.600 px de ancho: un recorte 9:16 (608 px de ancho) cortaría barras, tablas y el cara a cara. No recortar: volver a renderizar cada Short a 1080×1920 con el mismo motor, como los Shorts originales del canal (subtítulos en el centro, barra de progreso arriba).
+
+## Renderizados (1080×1920)
+
+| Archivo | Duración | Título para YouTube Shorts |
+|---|---|---|
+| `short_1_sold-vs-waited.mp4` | 58 s | You Lose 45%. What You Do Next Costs €37,000 |
+| `short_2_japan-1989.mp4` | 59 s | Your World ETF Was This Concentrated Once Before (Japan 1989) |
+| `short_3_13-years.mp4` | 53 s | €10,000 in a World ETF at the 1999 Top: How Long to Break Even? |
+| `short_4_euro-trap.mp4` | 35 s | Your US Stock Didn't Move. You Still Lost 9% (Euro Investors) |
+| `short_5_amazon-90.mp4` | 39 s | Right About AI, Still Down 90%? Ask Amazon Investors |
+
+Regenerar: `python3 shorts.py build` (los ganchos están en `assets/tts/shorts_hooks.flac`; copiar a `build/shorts/hooks_raw.wav`).
