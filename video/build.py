@@ -1,5 +1,9 @@
 """Assemble the full video: alignment -> timeline -> audio mix -> frames -> MP4.
 
+v2: faster pacing (voice tempo, trimmed pauses, per-sentence scenes), silent
+"pause & guess" beats, camera moves, scene transitions, pop/slam/wipe entrances,
+chapter openers, chapter tracker and segmented progress bar.
+
 Usage:
   python3 build.py timeline            # align + timeline.json + audio
   python3 build.py render [t0 t1]      # render (optionally only a time range)
@@ -26,10 +30,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BUILD = os.path.join(HERE, "build")
 OUT = os.path.join(HERE, "output")
 TTS = os.path.join(BUILD, "tts")
+TTS_FAST = os.path.join(BUILD, "tts_fast")
 SR_V = 24000
-LEAD, TAIL = 0.5, 3.5
-CHAPTER_GAP = 1.4
-TARGET = float(os.environ.get("TARGET_SECONDS", 25 * 60))
+TEMPO = float(os.environ.get("TEMPO", 1.05))
+LEAD, TAIL = 0.3, 3.0
+CHAPTER_PRE = 1.1      # silence before a chapter's narration (opener animation)
+INTRA_GAP = 0.03       # between sentences of the same paragraph
+PARA_GAP = 0.12        # between paragraphs
+MAX_EDGE = 0.13        # max silence kept on each side of a segment
+TRANS = 0.22           # scene transition length
 
 
 # ------------------------------------------------------------------ captions text
@@ -46,7 +55,6 @@ def clean(tok):
 
 
 def caption_words(tokens, times):
-    """Merge spelled letters (M S C I) and a few phrases into display words."""
     out, i = [], 0
     while i < len(tokens):
         done = False
@@ -88,74 +96,96 @@ def caption_groups(words):
     return groups
 
 
-# ------------------------------------------------------------------ timeline
-def align_chunk(ci, seg_ids):
+# ------------------------------------------------------------------ audio helpers
+def read_wav(path):
+    with wave.open(path) as w:
+        return np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float32) / 32768
+
+
+def fast_path(ci):
+    os.makedirs(TTS_FAST, exist_ok=True)
+    src = os.path.join(TTS, f"chunk_{ci:02d}.wav")
+    dst = os.path.join(TTS_FAST, f"chunk_{ci:02d}_{TEMPO:.3f}.wav")
+    if not os.path.exists(dst):
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-af", f"atempo={TEMPO}",
+                        "-ar", str(SR_V), "-ac", "1", dst], check=True)
+    return dst
+
+
+def align_chunk(path, seg_ids):
     from sphinx_align import align as sphinx_align
     toks, starts = [], []
     for si in seg_ids:
         ws = spoken(SEGMENTS[si]["text"]).split()
         starts.append(len(toks))
         toks += ws
-    path = os.path.join(TTS, f"chunk_{ci:02d}.wav")
     try:
         times = sphinx_align(path, toks)
     except Exception as e:
         print("  sphinx failed, falling back to pause alignment:", e)
         from align import align as pause_align
-        ends = {s - 1 for s in starts[1:]} | {len(toks) - 1}
+        ends = {s - 1 for s in starts[1:] if s > 0} | {len(toks) - 1}
         times, _ = pause_align(path, toks, ends)
     return toks, starts, times
 
 
-def read_wav(path):
-    with wave.open(path) as w:
-        return np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float32) / 32768
-
-
+# ------------------------------------------------------------------ timeline
 def build_timeline():
     os.makedirs(BUILD, exist_ok=True)
-    pieces = []  # (chunk audio array, a, b) per segment, in seconds within chunk
     segs = []
     for ci, seg_ids in enumerate(chunks()):
-        path = os.path.join(TTS, f"chunk_{ci:02d}.wav")
-        if not os.path.exists(path):
+        if not os.path.exists(os.path.join(TTS, f"chunk_{ci:02d}.wav")):
             print(f"chunk {ci} missing -> stopping timeline at segment {seg_ids[0]}")
             break
-        x = read_wav(path)
-        dur = len(x) / SR_V
-        toks, starts, times = align_chunk(ci, seg_ids)
+        path = fast_path(ci)
+        dur = len(read_wav(path)) / SR_V
+        toks, starts, times = align_chunk(path, seg_ids)
         starts_e = starts + [len(toks)]
         for k, si in enumerate(seg_ids):
-            a_tok, b_tok = starts_e[k], starts_e[k + 1]
-            w_first, w_last = times[a_tok][0], times[b_tok - 1][1]
-            prev_end = times[a_tok - 1][1] if a_tok > 0 else 0.0
-            next_start = times[b_tok][0] if b_tok < len(toks) else dur
-            cut_a = 0.0 if k == 0 else (prev_end + w_first) / 2
-            cut_b = dur if k == len(seg_ids) - 1 else (w_last + next_start) / 2
-            segs.append(dict(seg=si, chunk=ci, cut_a=cut_a, cut_b=cut_b,
-                             tokens=toks[a_tok:b_tok], times=times[a_tok:b_tok]))
-            pieces.append((ci, cut_a, cut_b))
-    speech = sum(s["cut_b"] - s["cut_a"] for s in segs)
-    n_ch = sum(1 for s in segs if s["seg"] in CHAPTER_STARTS and s["seg"] != 0)
-    fixed = LEAD + TAIL + n_ch * CHAPTER_GAP
-    gap = (TARGET - speech - fixed) / max(1, len(segs) - 1)
-    gap = float(np.clip(gap, 0.25, 0.9))
+            a, b = starts_e[k], starts_e[k + 1]
+            if a == b:
+                segs.append(dict(seg=si, silent=True, hold=SEGMENTS[si].get("hold", 3.0), path=None,
+                                 tokens=[], times=[], src_gap=1.0))
+                continue
+            w_first, w_last = times[a][0], times[b - 1][1]
+            prev_end = times[a - 1][1] if a > 0 else None
+            next_start = times[b][0] if b < len(toks) else None
+            lead = MAX_EDGE if prev_end is None else min(MAX_EDGE, (w_first - prev_end) / 2)
+            trail = 0.25 if next_start is None else min(MAX_EDGE, (next_start - w_last) / 2)
+            segs.append(dict(seg=si, silent=False, path=path, cut_a=max(0.0, w_first - lead),
+                             cut_b=min(dur, w_last + trail), tokens=toks[a:b], times=times[a:b],
+                             src_gap=(next_start - w_last) if next_start is not None else 1.0))
     t = LEAD
     for i, s in enumerate(segs):
         if i > 0:
-            t += gap + (CHAPTER_GAP if s["seg"] in CHAPTER_STARTS else 0.0)
-        s["t0"] = t  # global time where this segment's audio piece starts
-        s["words"] = [(w, t + a - s["cut_a"], t + b - s["cut_a"]) for w, (a, b) in zip(s["tokens"], s["times"])]
-        t += s["cut_b"] - s["cut_a"]
+            prev = segs[i - 1]
+            if s["seg"] in CHAPTER_STARTS:
+                t += CHAPTER_PRE
+            elif prev["silent"] or s["silent"]:
+                t += 0.08
+            else:
+                t += INTRA_GAP if prev["src_gap"] < 0.55 else PARA_GAP
+        s["t0"] = t
+        if s["silent"]:
+            s["words"] = []
+            t += s["hold"]
+        else:
+            s["words"] = [(w, t + a - s["cut_a"], t + b - s["cut_a"]) for w, (a, b) in zip(s["tokens"], s["times"])]
+            t += s["cut_b"] - s["cut_a"]
     total = t + TAIL
-    # scene windows: from previous scene end to the start of the next
     for i, s in enumerate(segs):
-        s["start"] = 0.0 if i == 0 else s["t0"] - (gap / 2 if s["seg"] not in CHAPTER_STARTS else 0.15)
+        if i == 0:
+            s["start"] = 0.0
+        elif s["seg"] in CHAPTER_STARTS:
+            s["start"] = s["t0"] - CHAPTER_PRE
+        else:
+            s["start"] = s["t0"] - (0.02 if s["silent"] else 0.06)
     for i, s in enumerate(segs):
         s["end"] = segs[i + 1]["start"] if i + 1 < len(segs) else total
-    tl = dict(total=total, gap=gap, segments=segs)
+    speech = sum(s["cut_b"] - s["cut_a"] for s in segs if not s["silent"])
+    tl = dict(total=total, segments=segs, tempo=TEMPO)
     json.dump(tl, open(os.path.join(BUILD, "timeline.json"), "w"))
-    print(f"timeline: {len(segs)} segments, speech {speech:.0f}s, gap {gap:.2f}s, total {total:.1f}s ({total / 60:.1f} min)")
+    print(f"timeline: {len(segs)} scenes, speech {speech:.0f}s, total {total:.1f}s ({total / 60:.1f} min)")
     return tl
 
 
@@ -166,11 +196,12 @@ def build_audio(tl):
     voice = np.zeros(n, np.float32)
     cache = {}
     for s in tl["segments"]:
-        ci = s["chunk"]
-        if ci not in cache:
-            cache[ci] = read_wav(os.path.join(TTS, f"chunk_{ci:02d}.wav"))
-        x = cache[ci][int(s["cut_a"] * SR_V):int(s["cut_b"] * SR_V)].copy()
-        f = min(len(x), int(0.01 * SR_V))
+        if s["silent"]:
+            continue
+        if s["path"] not in cache:
+            cache[s["path"]] = read_wav(s["path"])
+        x = cache[s["path"]][int(s["cut_a"] * SR_V):int(s["cut_b"] * SR_V)].copy()
+        f = min(len(x) // 2, int(0.012 * SR_V))
         if f:
             x[:f] *= np.linspace(0, 1, f)
             x[-f:] *= np.linspace(1, 0, f)
@@ -180,55 +211,68 @@ def build_audio(tl):
     with wave.open(vpath, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR_V)
         w.writeframes((np.clip(voice, -1, 1) * 32767).astype("<i2").tobytes())
-    # music + sfx at 48k
+
     m = music.soundtrack(total) * 0.9
     sfx = np.zeros_like(m)
 
-    def add(sound, t):
-        st = int(t * music.SR)
+    def add(sound, t, gain=1.0):
+        if t is None:
+            return
+        st = max(0, int(t * music.SR))
         seg = sfx[st:st + len(sound)]
-        seg += sound[: len(seg)]
+        seg += sound[: len(seg)] * gain
 
-    wh = music.whoosh()
-    for s in tl["segments"]:
+    wh, sw, th, dg, ri, pp, tk = music.whoosh(), music.swish(), music.thud(), music.ding(), music.riser(), music.pop(), music.tick()
+    for i, s in enumerate(tl["segments"]):
+        seg = SEGMENTS[s["seg"]]
         if s["seg"] in CHAPTER_STARTS and s["seg"] != 0:
-            add(wh, max(0, s["t0"] - 0.55))
-        for e in SEGMENTS[s["seg"]]["elements"]:
-            if e["kind"] == "big" and e.get("at"):
-                add(music.pop() * 0.6, marker_time(s, e["at"]))
-            if e["kind"] == "options" and e.get("countdown") and not prev_has(s, e):
-                t0 = element_time(s, e)
-                for k in range(3):
-                    add(music.tick(), t0 + 0.6 + k)
+            add(ri, s["start"] - 0.6, 0.8)
+            add(wh, s["start"] - 0.1)
+            add(th, s["start"] + 0.35, 0.7)
+        elif i > 0 and not first_persists(s):
+            add(sw, s["start"] - 0.06, 0.9)
+        for k, e in enumerate(seg["elements"]):
+            ta = element_time(s, e, k)
+            if ta < -1e8:
+                continue
+            kind = e["kind"]
+            if kind in ("big", "donut", "versus", "card", "boxes", "pill"):
+                add(pp, ta, 0.55)
+            if kind in ("stamp", "strike2"):
+                add(th, ta + (0.12 if kind == "stamp" else 0.0), 0.9)
+            if kind == "options":
+                if e.get("countdown") and not prev_has(s, e):
+                    for j in range(3):
+                        add(tk, ta + 0.6 + j)
+                if e.get("reveal"):
+                    add(dg, marker_time(s, e["reveal"]))
+            if kind == "timer":
+                for j in range(int(e.get("seconds", 3))):
+                    add(tk, ta + j, 1.2)
+            if kind == "subscribe":
+                add(tk, ta + 1.1, 1.5)
+                add(dg, ta + 1.2, 0.6)
     mpath = os.path.join(BUILD, "music.wav")
-    stereo = np.clip(m * 0.22 + sfx, -1, 1)
+    stereo = np.clip(m * 0.26 + sfx, -1, 1)
     with wave.open(mpath, "wb") as w:
         w.setnchannels(2); w.setsampwidth(2); w.setframerate(music.SR)
         w.writeframes((stereo * 32767).astype("<i2").tobytes())
     apath = os.path.join(BUILD, "mix.m4a")
     fc = ("[0:a]aresample=48000,loudnorm=I=-16:TP=-2:LRA=9,pan=stereo|c0=c0|c1=c0,asplit=2[v][vs];"
-          "[1:a]volume=0.55[m];"
-          "[m][vs]sidechaincompress=threshold=0.03:ratio=3:attack=30:release=500[md];"
+          "[1:a]volume=0.6[m];"
+          "[m][vs]sidechaincompress=threshold=0.03:ratio=3:attack=30:release=400[md];"
           "[v][md]amix=inputs=2:normalize=0:duration=longest,loudnorm=I=-14:TP=-1.5:LRA=11,apad[out]")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", vpath, "-i", mpath, "-filter_complex", fc,
-                    "-map", "[out]", "-t", f"{total:.3f}", "-c:a", "aac", "-b:a", "192k", apath], check=True)
+                    "-map", "[out]", "-t", f"{total:.3f}", "-c:a", "aac", "-b:a", "128k", apath], check=True)
     print("audio:", apath)
 
 
 # ------------------------------------------------------------------ scene helpers
-_PREV = {}
-
-
-def seg_by_index():
-    return {s["seg"]: s for s in TL["segments"]}
-
-
 def marker_time(s, marker):
-    text = SEGMENTS[s["seg"]]["text"].split()
     idx = 0
-    for tok in text:
+    for tok in SEGMENTS[s["seg"]]["text"].split():
         if tok.startswith("@"):
-            if tok[1:] == marker:
+            if tok[1:] == marker and s["words"]:
                 return s["words"][min(idx, len(s["words"]) - 1)][1]
             continue
         idx += 1
@@ -245,22 +289,31 @@ def ident(e):
         return json.dumps(["big", e["fmt"], e["to"], e.get("color"), e.get("size")])
     if e["kind"] == "chart":
         return "chart"
-    return E.el_key(e)
+    return E.el_key({k: v for k, v in e.items() if k not in ("until", "delay")})
 
 
 def prev_has(s, e):
     k = ident(e)
-    return any(ident(p) == k for p in prev_elements(s))
+    return any(ident(p) == k and not p.get("until") for p in prev_elements(s))
 
 
-def element_time(s, e):
+def first_persists(s):
+    els = SEGMENTS[s["seg"]]["elements"]
+    return bool(els) and prev_has(s, els[0]) and not els[0].get("at")
+
+
+def element_time(s, e, k=0):
     if prev_has(s, e) and not e.get("at"):
-        return -1e9  # persisted from the previous scene: no entrance
+        return -1e9
     if e.get("at"):
         t = marker_time(s, e["at"])
         if t is not None:
             return t - 0.08
-    return s["start"] + 0.05
+    return s["start"] + 0.04 + e.get("delay", 0.0) + 0.07 * k
+
+
+def until_time(s, e):
+    return marker_time(s, e["until"]) - 0.1 if e.get("until") and marker_time(s, e["until"]) else None
 
 
 def chart_in_prev(s):
@@ -276,42 +329,75 @@ def final_sprite(e):
     return E.sprite_cached(E.el_key(e))
 
 
-def layout(s):
-    els = SEGMENTS[s["seg"]]["elements"]
-    sizes = [final_sprite(e).size for e in els]
-    if not els:
-        return []
-    region = E.CONTENT_BOTTOM - E.CONTENT_TOP
-    sp = SPACING
-
-    def tot(sp_):
-        return sum(h for _, h in sizes) + sum(pair_gap(els[k], els[k + 1], sp_) for k in range(len(els) - 1))
-    total = tot(sp)
-    if total > region:
-        sp = max(8, SPACING - (total - region) / max(1, len(els) - 1))
-        total = tot(sp)
-    y = E.CONTENT_TOP + (region - total) / 2
-    # keep a persisting first element where it was in the previous scene
-    i = s["seg"]
-    if i > 0 and i - 1 in LAYOUT_Y and els and not els[0].get("at") and ident(els[0]) == LAYOUT_Y[i - 1][0]:
-        y_prev = LAYOUT_Y[i - 1][1]
-        if y_prev + total <= E.CONTENT_BOTTOM + 10:
-            y = y_prev
-    LAYOUT_Y[i] = (ident(els[0]), y)
-    if y < E.CONTENT_TOP - 30:
-        print(f"WARNING segment {s['seg']} overflows by {E.CONTENT_TOP - y:.0f}px")
-    out = []
-    for k, (e, (w, h)) in enumerate(zip(els, sizes)):
-        out.append((e, (E.W - w) / 2, y, w, h))
-        y += h + (pair_gap(e, els[k + 1], sp) if k + 1 < len(els) else 0)
-    return out
-
-
 def pair_gap(a, b, sp):
     return 6 if a["kind"] == b["kind"] and a["kind"] in ("bars", "rows") else sp
 
 
-# ------------------------------------------------------------------ frame
+OVERLAY = {"pause", "timer"}
+
+
+def overlay_pos(e):
+    w, h = final_sprite(e).size
+    if e["kind"] == "pause":
+        return (e, E.W - 60 - w, 70, w, h)
+    return (e, E.W - 70 - w, 200, w, h)
+
+
+def layout(s):
+    all_els = SEGMENTS[s["seg"]]["elements"]
+    els = [e for e in all_els if e["kind"] not in OVERLAY]
+    if not els:
+        return [overlay_pos(e) for e in all_els if e["kind"] in OVERLAY]
+    # elements sharing a 'slot' occupy the same place (swapped with at/until)
+    slots, order = {}, []
+    for e in els:
+        key = e.get("slot") or id(e)
+        if key not in slots:
+            slots[key] = []
+            order.append(key)
+        slots[key].append(e)
+    sizes = {key: (max(final_sprite(e).width for e in slots[key]), max(final_sprite(e).height for e in slots[key]))
+             for key in order}
+    region = E.CONTENT_BOTTOM - E.CONTENT_TOP
+    firsts = [slots[k][0] for k in order]
+
+    def tot(sp_):
+        return sum(sizes[k][1] for k in order) + sum(pair_gap(firsts[j], firsts[j + 1], sp_) for j in range(len(order) - 1))
+    sp = SPACING
+    total = tot(sp)
+    if total > region:
+        sp = max(8, SPACING - (total - region) / max(1, len(order) - 1))
+        total = tot(sp)
+    y = E.CONTENT_TOP + (region - total) / 2
+    i = s["seg"]
+    if i > 0 and i - 1 in LAYOUT_Y and not els[0].get("at") and ident(els[0]) == LAYOUT_Y[i - 1][0]:
+        if LAYOUT_Y[i - 1][1] + total <= E.CONTENT_BOTTOM + 10:
+            y = LAYOUT_Y[i - 1][1]
+    LAYOUT_Y[i] = (ident(els[0]), y)
+    if y < E.CONTENT_TOP - 30:
+        print(f"WARNING segment {i} overflows by {E.CONTENT_TOP - y:.0f}px")
+    pos = {}
+    for j, key in enumerate(order):
+        w, h = sizes[key]
+        pos[key] = (y, h)
+        y += h + (pair_gap(firsts[j], firsts[j + 1], sp) if j + 1 < len(order) else 0)
+    out = [overlay_pos(e) for e in all_els if e["kind"] in OVERLAY]
+    for e in els:
+        key = e.get("slot") or id(e)
+        yy, h = pos[key]
+        w = final_sprite(e).width
+        if e["kind"] == "ticker":
+            out.append((e, 0, 72, E.W, 96))
+        else:
+            out.append((e, (E.W - w) / 2, yy, w, h))
+    return out
+
+
+# ------------------------------------------------------------------ element animation
+POP = {"big", "stamp", "donut", "timer", "pause", "boxes", "card", "subscribe", "pill"}
+WIPE = {"head", "sub"}
+
+
 def with_alpha(img, a):
     if a >= 0.999:
         return img
@@ -320,99 +406,238 @@ def with_alpha(img, a):
     return img
 
 
+def scaled(img, sc):
+    if abs(sc - 1) < 0.004:
+        return img
+    return img.resize((max(1, int(img.width * sc)), max(1, int(img.height * sc))), Image.BILINEAR)
+
+
 def dynamic_sprite(e, s, t, t_app):
     k = e["kind"]
-    since = t - t_app
+    since = t - t_app if t_app > -1e8 else 99.0
     if k == "big" and e.get("text") is None and e.get("frm", 0) != e["to"]:
-        p = E.ease_out(since / 1.0)
+        p = E.ease_out(since / 0.8)
         if p < 1:
-            v = e.get("frm", 0) + (e["to"] - e.get("frm", 0)) * p
-            ee = dict(e, to=v)
-            return E.build_sprite(ee)
-    if k in ("bars", "waffle") and since < 1.0 and t_app > -1e8:
-        return E.build_sprite(e, prog=since / (0.7 if k == "bars" else 0.9))
+            return E.build_sprite(dict(e, to=e.get("frm", 0) + (e["to"] - e.get("frm", 0)) * p))
+    if k in ("bars", "waffle") and since < 0.9:
+        return E.build_sprite(e, prog=since / (0.55 if k == "bars" else 0.8))
+    if k == "chips" and since < E.PROG["chips"]:
+        return E.build_sprite(e, prog=since / E.PROG["chips"])
     if k == "chart":
         draw = e.get("draw")
         if draw:
             if draw == "s":
-                d0 = s["start"] + 0.2
-                dur = max(1.5, (s["end"] - s["start"]) * 0.8)
+                d0, dur = s["start"] + 0.15, max(1.2, (s["end"] - s["start"]) * 0.75)
             else:
-                d0 = marker_time(s, draw) or s["start"]
-                dur = 1.6
+                d0, dur = (marker_time(s, draw) or s["start"]), 1.3
             p = (t - d0) / dur
             if p < 1:
                 return E.build_sprite(e, prog=max(0.0, p))
     if k == "options":
         reveal_t = marker_time(s, e["reveal"]) if e.get("reveal") else None
-        now = dict(t=since if t_app > -1e8 else 99, revealed=reveal_t is not None and t >= reveal_t)
-        if since < 4.5 or now["revealed"] or t_app < -1e8:
+        now = dict(t=since, revealed=reveal_t is not None and t >= reveal_t)
+        if since < 4.5 or now["revealed"]:
             return E.build_sprite(e, now=now)
+    if k in E.TIMED and since < E.TIMED[k]:
+        return E.build_sprite(e, now=dict(t=since))
+    if k in E.PROG and since < E.PROG[k]:
+        return E.build_sprite(e, prog=since / E.PROG[k])
     return None
 
 
-def render_frame(t, s, lay, base):
-    frame = base.copy()
-    for e, x, y, w, h in lay:
+def place(layer, spr, cx, cy):
+    layer.paste(spr, (int(cx - spr.width / 2), int(cy - spr.height / 2)), spr)
+
+
+def content_layer(s, lay, t):
+    layer = Image.new("RGBA", (E.W, E.H), (0, 0, 0, 0))
+    for k, (e, x, y, w, h) in enumerate(lay):
         if e["kind"] == "gap":
             continue
-        t_app = element_time(s, e)
+        t_app = element_time(s, e, k)
         if e["kind"] == "chart" and not e.get("at") and chart_in_prev(s):
             t_app = -1e9
         if t < t_app:
             continue
-        since = t - t_app
-        a = E.ease_out(since / 0.4) if t_app > -1e8 else 1.0
-        dy = (1 - a) * 22
+        tu = until_time(s, e)
+        out_a = 1.0
+        if tu is not None and t >= tu:
+            out_a = 1 - E.ease_out((t - tu) / 0.18)
+            if out_a <= 0:
+                continue
+        since = t - t_app if t_app > -1e8 else 99.0
         spr = dynamic_sprite(e, s, t, t_app) or final_sprite(e)
-        spr = with_alpha(spr, a)
-        sx = int(x + (w - spr.width) / 2)
-        sy = int(y + (h - spr.height) / 2 + dy)
-        frame.paste(spr, (sx, sy), spr)
+        cx, cy = x + w / 2, y + h / 2
+        kind = e["kind"]
+        a, sc, dx, dy = 1.0, 1.0, 0.0, 0.0
+        if since < 0.5:
+            p = since / 0.32
+            if kind == "stamp":
+                sc = 1.9 - 0.9 * E.ease_out(since / 0.16)
+                a = min(1, since / 0.08)
+            elif kind in POP:
+                sc = 0.55 + 0.45 * E.ease_out_back(p)
+                a = E.ease_out(since / 0.18)
+            elif kind in WIPE:
+                wp = E.ease_out(since / 0.38)
+                if wp < 1:
+                    spr = spr.crop((0, 0, max(1, int(spr.width * wp)), spr.height))
+                    cx = x + w / 2 - (final_sprite(e).width - spr.width) / 2 if kind != "chart" else cx
+                a = E.ease_out(since / 0.2)
+                dy = 10 * (1 - wp)
+            elif kind in ("tag",):
+                a = E.ease_out(p)
+                dy = -14 * (1 - a)
+            else:
+                a = E.ease_out(p)
+                dy = 28 * (1 - a)
+        # count-up punch + red shake
+        if kind == "big" and e.get("text") is None and e.get("frm", 0) != e["to"] and 0.8 <= since < 1.0:
+            sc *= 1 + 0.07 * (1 - (since - 0.8) / 0.2)
+        if kind in ("big", "strike2") and e.get("color", "white") == "red" and since < 0.45:
+            dx = 9 * math.sin(since * 70) * (1 - since / 0.45)
+        if kind == "stamp" and since < 0.3:
+            dx = 6 * math.sin(since * 90) * (1 - since / 0.3)
+        if out_a < 1:
+            a *= out_a
+            sc *= 0.94 + 0.06 * out_a
+        spr = with_alpha(scaled(spr, sc), a)
+        if kind in WIPE and since < 0.5:
+            layer.paste(spr, (int(x + (w - final_sprite(e).width) / 2), int(cy - spr.height / 2 + dy)), spr)
+        else:
+            place(layer, spr, cx + dx, cy + dy)
+    return layer
+
+
+def zoom_of(s, t):
+    if SEGMENTS[s["seg"]].get("cam") == "none":
+        return 1.0
+    span = max(0.5, s["end"] - s["start"])
+    return 1.0 + 0.035 * E.ease_in_out((t - s["start"]) / span)
+
+
+def zoomed(layer, z, shift=(0, 0), extra=1.0, alpha=1.0):
+    """Scale the content layer about the frame centre; returns (sprite, x, y)."""
+    bb = layer.getbbox()
+    if not bb:
+        return None
+    crop = layer.crop(bb)
+    zz = z * extra
+    spr = scaled(crop, zz)
+    spr = with_alpha(spr, alpha)
+    cx, cy = E.W / 2, E.H / 2
+    x = cx + (bb[0] - cx) * zz + shift[0]
+    y = cy + (bb[1] - cy) * zz + shift[1]
+    return spr, int(x), int(y)
+
+
+# ------------------------------------------------------------------ frame
+TL = None
+LAYS = {}
+FINAL_CACHE = {}
+CH_BOUNDS = []
+
+
+def final_layer(si):
+    if si not in FINAL_CACHE:
+        s = TL["segments"][si]
+        te = s["end"] - 1e-3
+        FINAL_CACHE.clear()
+        FINAL_CACHE[si] = zoomed(content_layer(s, LAYS[si], te), zoom_of(s, te))
+    return FINAL_CACHE[si]
+
+
+def chapter_index(t):
+    k = 0
+    for j, b in enumerate(CH_BOUNDS):
+        if t >= b:
+            k = j
+    return k
+
+
+def render_frame(t, si, segs):
+    s = segs[si]
+    frame = E.background_at(t).copy()
+    E.draw_particles(frame, t)
+    tt = t - s["start"]
+    is_ch = s["seg"] in CHAPTER_STARTS and s["seg"] != 0
+    # outgoing scene
+    if si > 0 and not first_persists(s):
+        dur = 0.35 if is_ch else TRANS
+        if tt < dur:
+            p = E.ease_in_out(tt / dur)
+            prev = final_layer(si - 1)
+            if prev:
+                spr, x, y = prev
+                if is_ch:
+                    spr2 = with_alpha(spr, 1 - p)
+                    frame.paste(spr2, (int(x - 700 * p * p), y), spr2)
+                else:
+                    sc = 1 - 0.05 * p
+                    spr2 = with_alpha(scaled(spr, sc), 1 - p)
+                    frame.paste(spr2, (int(x + spr.width * (1 - sc) / 2), int(y + spr.height * (1 - sc) / 2 - 40 * p)), spr2)
+    z = zoomed(content_layer(s, LAYS[si], t), zoom_of(s, t))
+    if z:
+        spr, x, y = z
+        frame.paste(spr, (x, y), spr)
     src = SEGMENTS[s["seg"]].get("src")
     if src:
         sp = E.source_sprite(src)
+        a = min(1.0, max(0.0, (tt - 0.2) / 0.3))
+        sp = with_alpha(sp, a)
         frame.paste(sp, ((E.W - sp.width) // 2, E.SOURCE_Y - sp.height // 2), sp)
-    # captions
     for g in s["groups"]:
-        g_start, g_end = g[0][1], g[-1][2] + 0.25
+        g_start, g_end = g[0][1], g[-1][2] + 0.18
         if g_start - 0.05 <= t < g_end:
             active = 0
             for i, (_, a_, _b) in enumerate(g):
                 if t >= a_ - 0.03:
                     active = i
             cs = E.caption_sprite(tuple(w for w, _, _ in g), active)
+            pop = E.ease_out_back((t - g_start + 0.05) / 0.14)
+            cs = scaled(cs, 0.85 + 0.15 * pop)
             frame.paste(cs, ((E.W - cs.width) // 2, E.CAPTION_Y - cs.height // 2), cs)
             break
-    # progress bar
+    # chapter tracker + segmented progress bar
+    k = chapter_index(t)
+    label = "INTRO" if k == 0 else f"{k:02d} · {CH[k - 1].upper()}"
+    tr = E.tracker_sprite(label)
+    frame.paste(tr, (40, 26), tr)
     d = ImageDraw.Draw(frame)
-    d.rectangle((0, 0, int(E.W * t / TL["total"]), 7), fill=E.C["amber"])
+    bounds = CH_BOUNDS + [TL["total"]]
+    gap = 6
+    for j in range(len(CH_BOUNDS)):
+        a, b = bounds[j], bounds[j + 1]
+        x0 = E.W * a / TL["total"] + (gap / 2 if j else 0)
+        x1 = E.W * b / TL["total"] - (gap / 2 if j < len(CH_BOUNDS) - 1 else 0)
+        d.rectangle((x0, 0, x1, 7), fill=(26, 34, 50))
+        xf = min(x1, E.W * t / TL["total"])
+        if xf > x0:
+            d.rectangle((x0, 0, xf, 7), fill=E.C["amber"])
     return frame
 
 
-TL = None
-
-
 def load_tl():
-    global TL
+    global TL, CH_BOUNDS
     TL = json.load(open(os.path.join(BUILD, "timeline.json")))
     for s in TL["segments"]:
         s["groups"] = caption_groups(caption_words(s["tokens"], [(a, b) for _, a, b in s["words"]]))
+    CH_BOUNDS = [0.0] + [s["start"] for s in TL["segments"] if s["seg"] in CHAPTER_STARTS and s["seg"] != 0]
     return TL
 
 
 def render_range(args):
     f0, f1, path = args
+    if os.path.exists(path + ".done"):
+        return path
     load_tl()
-    base = E.background()
     segs = TL["segments"]
-    lays = {}
+    for k, s_ in enumerate(segs):
+        LAYS[k] = layout(s_)
     p = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
                           "-s", f"{E.W}x{E.H}", "-r", str(E.FPS), "-i", "-", "-c:v", "libx264",
-                          "-preset", "veryfast", "-crf", "20", "-tune", "animation", "-pix_fmt", "yuv420p",
+                          "-preset", "medium", "-crf", "26", "-tune", "animation", "-pix_fmt", "yuv420p",
                           "-threads", "2", path], stdin=subprocess.PIPE)
-    for k, s_ in enumerate(segs):
-        lays[k] = layout(s_)
     si = 0
     for f in range(f0, f1):
         t = f / E.FPS
@@ -420,12 +645,11 @@ def render_range(args):
             si += 1
         while si > 0 and t < segs[si]["start"]:
             si -= 1
-        s = segs[si]
-        if si not in lays:
-            lays[si] = layout(s)
-        p.stdin.write(render_frame(t, s, lays[si], base).tobytes())
+        p.stdin.write(render_frame(t, si, segs).tobytes())
     p.stdin.close()
     p.wait()
+    if p.returncode == 0:
+        open(path + ".done", "w").write(f"{f0} {f1}\n")
     return path
 
 
@@ -435,11 +659,12 @@ def render(t0=None, t1=None, workers=4, name="video.mp4"):
     total = TL["total"]
     f0 = int((t0 or 0) * E.FPS)
     f1 = int((t1 if t1 is not None else total) * E.FPS)
-    step = math.ceil((f1 - f0) / workers)
-    jobs = [(a, min(a + step, f1), os.path.join(BUILD, f"part_{i}.mp4"))
+    nparts = workers * 3
+    step = math.ceil((f1 - f0) / nparts)
+    jobs = [(a, min(a + step, f1), os.path.join(BUILD, f"part_{i:02d}.mp4"))
             for i, a in enumerate(range(f0, f1, step))]
-    with mp.Pool(len(jobs)) as pool:
-        parts = pool.map(render_range, jobs)
+    with mp.Pool(workers) as pool:
+        parts = pool.map(render_range, jobs, chunksize=1)
     lst = os.path.join(BUILD, "parts.txt")
     open(lst, "w").write("".join(f"file '{p}'\n" for p in parts))
     out = os.path.join(OUT, name)
@@ -454,8 +679,7 @@ def render(t0=None, t1=None, workers=4, name="video.mp4"):
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "all"
     if cmd in ("timeline", "all"):
-        tl = build_timeline()
-        TL = tl
+        build_timeline()
         load_tl()
         build_audio(TL)
     if cmd in ("render", "all"):

@@ -3,13 +3,13 @@
 | Carpeta | Contenido |
 |---|---|
 | `research/analisis_competencia_seo.md` | Análisis de competencia, tendencias (octubre de 2026) y paquete SEO |
-| `video/script.py` | Guion (inglés) + escenas sincronizadas con la narración |
+| `video/script.py` | Guion (inglés) + escenas v2: una frase por escena, pausas interactivas (`Q`), sellos, donuts, cara a cara, líneas del tiempo, cintas de titulares |
 | `video/data.py` | Datos: MSCI World net EUR 2000–2026, bonos de gobierno euro, simulaciones |
 | `video/engine.py` | Motor gráfico con el estilo del canal (Space Grotesk, JetBrains Mono, Inter) |
 | `video/tts.py` | Narración con Gemini TTS (voz `Iapetus`), un bloque por capítulo |
 | `video/sphinx_align.py` | Alineación forzada palabra a palabra (PocketSphinx) para los subtítulos |
 | `video/music.py` | Música de fondo y efectos generados por código (sin derechos de terceros) |
-| `video/build.py` | Línea de tiempo → mezcla de audio → render 1080p30 → MP4 |
+| `video/build.py` | Línea de tiempo (voz ×1,05, pausas recortadas) → mezcla con efectos → render 1080p30 con cámara, transiciones y barra de capítulos → MP4 |
 | `video/metadata.py` | Título, descripción con capítulos, etiquetas y miniatura |
 | `video/assets/tts/` | Narración generada (FLAC), para no tener que regenerarla |
 

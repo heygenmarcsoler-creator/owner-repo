@@ -226,9 +226,9 @@ def build_sprite(e, prog=1.0, now=None):
     if k == "gap":
         return Image.new("RGBA", (1, e.get("h", 30)), (0, 0, 0, 0))
     if k == "chips":
-        f = font("grotesk", 50, 600)
+        f = font("grotesk", 60, 600)
         items = e["items"]
-        ws = [text_w(f, t) + 56 for t in items]
+        ws = [text_w(f, t) + 64 for t in items]
         rowsl, cur, curw = [], [], 0
         for t, w_ in zip(items, ws):
             if cur and curw + w_ + 20 > 1500:
@@ -236,17 +236,22 @@ def build_sprite(e, prog=1.0, now=None):
             cur.append((t, w_)); curw += w_ + 20
         rowsl.append(cur)
         tot_w = int(max(sum(w_ for _, w_ in r) + 20 * (len(r) - 1) for r in rowsl)) + 4
-        img = Image.new("RGBA", (tot_w, 92 * len(rowsl)), (0, 0, 0, 0))
+        img = Image.new("RGBA", (tot_w, 108 * len(rowsl)), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
+        shown = len(items) if prog >= 1 else int(prog * len(items) + 0.999)
+        idx = 0
         for ri, r in enumerate(rowsl):
             x = (tot_w - (sum(w_ for _, w_ in r) + 20 * (len(r) - 1))) / 2
-            y = ri * 92
+            y = ri * 108
             for t, w_ in r:
-                d.rounded_rectangle((x, y, x + w_, y + 80), radius=40, fill=C["panel"] + (255,),
+                idx += 1
+                if idx > shown:
+                    break
+                d.rounded_rectangle((x, y, x + w_, y + 94), radius=47, fill=C["panel"] + (255,),
                                     outline=C["line"] + (255,), width=2)
-                d.text((x + 28, y + 12), t, font=f, fill=C["white"] + (255,))
+                d.text((x + 32, y + 12), t, font=f, fill=C["white"] + (255,))
                 if e.get("strike"):
-                    d.line((x + 10, y + 40, x + w_ - 10, y + 36), fill=C["red"] + (255,), width=6)
+                    d.line((x + 10, y + 50, x + w_ - 10, y + 44), fill=C["red"] + (255,), width=8)
                 x += w_ + 20
         return img
     if k == "rows":
@@ -265,6 +270,8 @@ def build_sprite(e, prog=1.0, now=None):
         return card_sprite(e["label"], e["title"])
     if k == "chart":
         return chart_sprite(e, prog)
+    if k in EXTRA_KINDS:
+        return EXTRA_KINDS[k](e, prog, now)
     raise ValueError(k)
 
 
@@ -582,4 +589,347 @@ def source_sprite(text):
     w = int(text_w(f, text)) + 10
     img = Image.new("RGBA", (w, 40), (0, 0, 0, 0))
     ImageDraw.Draw(img).text((5, 4), text, font=f, fill=C["source"] + (255,))
+    return img
+
+
+
+# ================================================================== v2: extra elements
+def ease_out_back(x, s=1.9):
+    x = max(0.0, min(1.0, x))
+    return 1 + (s + 1) * (x - 1) ** 3 + s * (x - 1) ** 2
+
+
+def spaced(d, xy, text, f, fill, sp=6):
+    x, y = xy
+    for ch in text:
+        d.text((x, y), ch, font=f, fill=fill)
+        x += text_w(f, ch) + sp
+    return x
+
+
+def spaced_w(f, text, sp=6):
+    return sum(text_w(f, ch) + sp for ch in text) - sp
+
+
+CH_TITLES = []  # filled by build.py from script.CH
+
+
+def chapter_card_sprite(e, prog=1.0, now=None):
+    """Big animated chapter opener: number slides in, title wipes, 7 progress dots."""
+    t = 99 if now is None else now.get("t", 99)
+    i, title = e["n"], e["title"]
+    W2, H2 = 1700, 640
+    img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    fl = font("mono", 40, 800)
+    lab = "CHAPTER"
+    a1 = ease_out(t / 0.3)
+    spaced(d, (W2 / 2 - spaced_w(fl, lab, 10) / 2, 20), lab, fl, C["muted"] + (int(255 * a1),), 10)
+    # number
+    num = f"{i:02d}"
+    fn = font("mono", 280, 800)
+    p = ease_out_back(t / 0.55)
+    ni = Image.new("RGBA", (int(text_w(fn, num)) + 120, 380), (0, 0, 0, 0))
+    ImageDraw.Draw(ni).text((60, 20), num, font=fn, fill=C["amber"] + (255,))
+    ni = glow(ni, 28, 0.6)
+    sc = 0.6 + 0.4 * p
+    ni2 = ni.resize((max(1, int(ni.width * sc)), max(1, int(ni.height * sc))), Image.BILINEAR)
+    if t < 0.6:
+        ni2 = ni2.copy(); ni2.putalpha(ni2.getchannel("A").point(lambda v: int(v * min(1, t / 0.25))))
+    img.paste(ni2, (int(W2 / 2 - ni2.width / 2), int(80 + (380 - ni2.height) / 2)), ni2)
+    # title wipe
+    ti = rich_text(title, 104, "grotesk", 700, "white", maxw=1600)
+    wp = ease_out((t - 0.35) / 0.5)
+    if wp > 0:
+        cw = max(1, int(ti.width * wp))
+        img.paste(ti.crop((0, 0, cw, ti.height)), (int(W2 / 2 - ti.width / 2), 455), ti.crop((0, 0, cw, ti.height)))
+    # amber sweep line
+    lp = ease_out((t - 0.2) / 0.6)
+    lw = int(900 * lp)
+    d.rectangle((W2 / 2 - lw / 2, 440, W2 / 2 + lw / 2, 446), fill=C["amber"] + (255,))
+    # progress dots
+    for k in range(7):
+        a = ease_out((t - 0.6 - k * 0.05) / 0.25)
+        if a <= 0:
+            continue
+        cx = W2 / 2 + (k - 3) * 46
+        col = C["amber"] if k + 1 == i else (C["soft"] if k + 1 < i else C["slate"])
+        r = 11 if k + 1 == i else 7
+        d.ellipse((cx - r, 600 - r, cx + r, 600 + r), fill=col + (int(255 * a),))
+    return img
+
+
+def donut_sprite(e, prog=1.0, now=None):
+    v, col = e["value"], C[e.get("color", "amber")]
+    R, th = 210, 52
+    S = 2
+    img = Image.new("RGBA", ((2 * R + 40) * S, (2 * R + 40) * S), (0, 0, 0, 0))  # ring canvas
+    d = ImageDraw.Draw(img)
+    box = (20 * S, 20 * S, (20 + 2 * R) * S, (20 + 2 * R) * S)
+    d.ellipse(box, outline=C["panel"] + (255,), width=th * S)
+    p = ease_out(prog)
+    if v * p > 0.2:
+        d.arc(box, -90, -90 + 360 * v / 100 * p, fill=col + (255,), width=th * S)
+    img = img.resize((2 * R + 40, 2 * R + 40), Image.LANCZOS)
+    img = glow(img, 16, 0.35)
+    dd = ImageDraw.Draw(img)
+    fn = font("mono", 104, 800)
+    s = e.get("fmt", "{:.0f}%").format(v * p)
+    dd.text((img.width / 2 - text_w(fn, s) / 2, img.height / 2 - 66), s, font=fn, fill=col + (255,))
+    fl = font("grotesk", 46, 500)
+    lab = e.get("label", "")
+    out = Image.new("RGBA", (max(img.width, int(text_w(fl, lab)) + 20), img.height + 70), (0, 0, 0, 0))
+    out.paste(img, ((out.width - img.width) // 2, 0), img)
+    ImageDraw.Draw(out).text((out.width / 2 - text_w(fl, lab) / 2, img.height + 4), lab, font=fl, fill=C["soft"] + (255,))
+    return out
+
+
+def versus_sprite(e, prog=1.0, now=None):
+    W2 = 1560
+    img = Image.new("RGBA", (W2, 330), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    p = ease_out(prog)
+    for side, (lab, fmt, to, col, frm) in enumerate([e["left"], e["right"]]):
+        cx = W2 * (0.24 if side == 0 else 0.76)
+        x0 = cx - 330
+        d.rounded_rectangle((x0, 20, x0 + 660, 310), radius=22, fill=C["panel"] + (235,),
+                            outline=C[col] + (255,), width=3)
+        fl = font("mono", 40, 800)
+        spaced(d, (cx - spaced_w(fl, lab.upper(), 6) / 2, 50), lab.upper(), fl, C["muted"] + (255,))
+        if fmt not in ("", "{}"):
+            v = frm + (to - frm) * p
+            s = fmt.format(v)
+            fv = font("mono", 116 if len(s) <= 9 else 92, 800)
+            d.text((cx - text_w(fv, s) / 2, 120 if len(s) <= 9 else 132), s, font=fv, fill=C[col] + (255,))
+        if e.get("notes"):
+            fn = font("grotesk", 38, 500)
+            n = e["notes"][side]
+            d.text((cx - text_w(fn, n) / 2, 250), n, font=fn, fill=C["soft"] + (255,))
+    d.ellipse((W2 / 2 - 60, 105, W2 / 2 + 60, 225), fill=C["amber"] + (255,))
+    fvs = font("grotesk", 56, 700)
+    d.text((W2 / 2 - text_w(fvs, "VS") / 2, 130), "VS", font=fvs, fill=(20, 18, 14, 255))
+    return img
+
+
+def timeline_sprite(e, prog=1.0, now=None):
+    items = e["items"]
+    W2, H2 = 1640, 300
+    img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    n = len(items)
+    p = ease_out(prog) if prog < 1 else 1.0
+    x0, x1, y = 70, W2 - 70, 150
+    d.line((x0, y, x0 + (x1 - x0) * min(1, p * 1.1), y), fill=C["line"] + (255,), width=6)
+    fy = font("mono", 44, 800)
+    fl = font("grotesk", 34, 500)
+    for k, (year, lab, col) in enumerate(items):
+        a = ease_out((p * n - k) / 1.0)
+        if a <= 0:
+            continue
+        cx = x0 + (x1 - x0) * (k / max(1, n - 1))
+        r = 14 + 6 * (1 - a)
+        d.ellipse((cx - r, y - r, cx + r, y + r), fill=C[col] + (int(255 * a),))
+        ys = str(year)
+        d.text((cx - text_w(fy, ys) / 2, y - 92 + 10 * (1 - a)), ys, font=fy, fill=C[col] + (int(255 * a),))
+        for li, line in enumerate(lab.split("\n")):
+            d.text((cx - text_w(fl, line) / 2, y + 36 + li * 40), line, font=fl, fill=C["soft"] + (int(255 * a),))
+    return img
+
+
+def ticker_sprite(e, prog=1.0, now=None):
+    t = 0 if now is None else now.get("t", 0)
+    W2, H2 = 1920, 96
+    img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, 8, W2, H2 - 8), fill=C["panel"] + (240,))
+    d.rectangle((0, 8, W2, 11), fill=C["amber"] + (255,))
+    f = font("mono", 40, 800)
+    items = e["items"]
+    widths = [text_w(f, s) + 110 for s, _ in items]
+    total = sum(widths)
+    off = -(t * 170) % total
+    x = off - total
+    while x < W2:
+        for (s, col), w_ in zip(items, widths):
+            if x + w_ > 0 and x < W2:
+                d.text((x, 26), s, font=f, fill=C[col] + (255,))
+                d.ellipse((x + w_ - 62, 44, x + w_ - 50, 56), fill=C["slate"] + (255,))
+            x += w_
+    return img
+
+
+def subscribe_sprite(e, prog=1.0, now=None):
+    t = 99 if now is None else now.get("t", 99)
+    W2, H2 = 760, 240
+    img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    clicked = t > 1.1
+    press = 1 - 0.06 * max(0, 1 - abs(t - 1.1) / 0.12)
+    bw, bh = 560 * press, 120 * press
+    x0, y0 = W2 / 2 - bw / 2, 60 - (bh - 120) / 2
+    col = C["slate"] if clicked else C["amber"]
+    d.rounded_rectangle((x0, y0, x0 + bw, y0 + bh), radius=60, fill=col + (255,))
+    f = font("grotesk", 56, 700)
+    txt = "SUBSCRIBED" if clicked else "SUBSCRIBE"
+    tc = C["white"] if clicked else (20, 18, 14)
+    tw = text_w(f, txt)
+    d.text((W2 / 2 - tw / 2 + 30, y0 + bh / 2 - 38), txt, font=f, fill=tc + (255,))
+    # bell icon
+    bx, by = W2 / 2 - tw / 2 - 36, y0 + bh / 2
+    ang = math.sin(t * 22) * 0.35 * max(0, 1 - abs(t - 1.5) / 0.6) if clicked else 0
+    pts = [(-18, 14), (-14, -6), (-8, -16), (0, -19), (8, -16), (14, -6), (18, 14)]
+    rot = [(bx + px * math.cos(ang) - py * math.sin(ang), by + px * math.sin(ang) + py * math.cos(ang)) for px, py in pts]
+    d.polygon(rot, fill=tc + (255,))
+    d.ellipse((bx - 6, by + 14, bx + 6, by + 24), fill=tc + (255,))
+    # cursor
+    if t < 1.6:
+        cp = ease_in_out(t / 1.0)
+        cx = W2 - 40 - (W2 - 40 - (W2 / 2 + 120)) * cp
+        cy = H2 - 10 - (H2 - 10 - (y0 + bh / 2 + 10)) * cp
+        arrow = [(cx, cy), (cx, cy + 46), (cx + 12, cy + 34), (cx + 22, cy + 56), (cx + 30, cy + 52),
+                 (cx + 20, cy + 31), (cx + 36, cy + 31)]
+        d.polygon(arrow, fill=(255, 255, 255, 255), outline=(0, 0, 0, 255))
+    return img
+
+
+def pause_sprite(e, prog=1.0, now=None):
+    t = 99 if now is None else now.get("t", 99)
+    txt = e.get("text", "PAUSE & GUESS")
+    f = font("mono", 46, 800)
+    tw = text_w(f, txt)
+    W2, H2 = int(tw + 170), 110
+    img = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    pulse = 0.5 + 0.5 * math.sin(t * 6)
+    d.rounded_rectangle((2, 2, W2 - 2, H2 - 2), radius=55, outline=C["amber"] + (int(160 + 95 * pulse),), width=4,
+                        fill=C["panel"] + (230,))
+    d.rectangle((48, 32, 60, 78), fill=C["amber"] + (255,))
+    d.rectangle((72, 32, 84, 78), fill=C["amber"] + (255,))
+    d.text((116, 26), txt, font=f, fill=C["amber"] + (255,))
+    return img
+
+
+def timer_sprite(e, prog=1.0, now=None):
+    t = 0 if now is None else now.get("t", 0)
+    n = e.get("seconds", 3)
+    R = 120
+    img = Image.new("RGBA", (2 * R + 40, 2 * R + 40), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    box = (20, 20, 20 + 2 * R, 20 + 2 * R)
+    d.ellipse(box, outline=C["line"] + (255,), width=16)
+    rem = max(0.0, n - t)
+    num = max(1, math.ceil(rem)) if rem > 0 else 0
+    col = C["amber"] if rem > 1 else C["red"]
+    d.arc(box, -90, -90 + 360 * (rem / n), fill=col + (255,), width=16)
+    fn = font("mono", 130, 800)
+    s = str(num) if num else "!"
+    d.text((img.width / 2 - text_w(fn, s) / 2, img.height / 2 - 92), s, font=fn, fill=col + (255,))
+    return glow(img, 12, 0.3)
+
+
+def stamp_sprite(e, prog=1.0, now=None):
+    txt = e["text"]
+    col = C[e.get("color", "red")]
+    f = font("grotesk", e.get("size", 84), 700)
+    tw = text_w(f, txt)
+    pad = 36
+    base = Image.new("RGBA", (int(tw + 2 * pad), 150), (0, 0, 0, 0))
+    d = ImageDraw.Draw(base)
+    d.rounded_rectangle((4, 4, base.width - 4, 146), radius=14, outline=col + (255,), width=8)
+    d.text((pad, 24), txt, font=f, fill=col + (255,))
+    return base.rotate(e.get("angle", 8), resample=Image.BICUBIC, expand=True)
+
+
+def strike_sprite(e, prog=1.0, now=None):
+    img = rich_text(e["text"], e.get("size", 170), "mono", 800, "white", maxw=1800)
+    pad = 30
+    out = Image.new("RGBA", (img.width + 2 * pad, img.height + 2 * pad), (0, 0, 0, 0))
+    out.paste(img, (pad, pad), img)
+    p = ease_out(prog)
+    if p > 0:
+        d = ImageDraw.Draw(out)
+        y = out.height * 0.55
+        d.line((pad - 10, y + 6, pad - 10 + (img.width + 20) * p, y - 10), fill=C["red"] + (255,), width=14)
+    return out
+
+
+EXTRA_KINDS = {
+    "chapter_card": chapter_card_sprite, "donut": donut_sprite, "versus": versus_sprite,
+    "timeline": timeline_sprite, "ticker": ticker_sprite, "subscribe": subscribe_sprite,
+    "pause": pause_sprite, "timer": timer_sprite, "stamp": stamp_sprite, "strike2": strike_sprite,
+}
+
+# kinds whose sprite depends on time since appearance (re-rendered while animating)
+TIMED = {"chapter_card": 1.4, "ticker": 1e9, "subscribe": 2.4, "pause": 1e9, "timer": 60}
+PROG = {"donut": 1.1, "versus": 1.0, "timeline": 1.4, "chips": 0.6, "strike2": 0.35}
+
+
+# ------------------------------------------------------------------ moving background
+@lru_cache(maxsize=1)
+def _bg_parts():
+    import numpy as np
+    base = np.asarray(background_nogrid(), np.float32)
+    return base
+
+
+@lru_cache(maxsize=1)
+def background_nogrid():
+    import numpy as np
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    base = np.zeros((H, W, 3), np.float32)
+    base[:] = C["bg"]
+    d1 = np.sqrt(((xx - 380) / 1500) ** 2 + ((yy - 120) / 900) ** 2)
+    base += (np.clip(1 - d1, 0, 1) ** 2)[..., None] * np.array([6, 12, 22], np.float32)
+    d2 = np.sqrt(((xx - 1880) / 700) ** 2 + ((yy - 1060) / 500) ** 2)
+    base += (np.clip(1 - d2, 0, 1) ** 2)[..., None] * np.array([14, 4, 2], np.float32)
+    dv = np.sqrt(((xx - W / 2) / (W * 0.75)) ** 2 + ((yy - H / 2) / (H * 0.8)) ** 2)
+    base *= (1 - 0.35 * np.clip(dv - 0.35, 0, 1))[..., None]
+    return Image.fromarray(np.clip(base, 0, 255).astype("uint8"), "RGB")
+
+
+_BG_CACHE = {}
+
+
+def background_at(t):
+    """Grid drifting diagonally (period 80px), cached per offset."""
+    import numpy as np
+    off = int(t * 14) % 80
+    img = _BG_CACHE.get(off)
+    if img is None:
+        base = _bg_parts().copy()
+        grid = np.zeros((H, W), np.float32)
+        grid[:, (np.arange(W) + off) % 80 == 0] = 1
+        grid[(np.arange(H) + off) % 80 == 0, :] = 1
+        base += grid[..., None] * np.array([4, 6, 9], np.float32)
+        img = Image.fromarray(np.clip(base, 0, 255).astype("uint8"), "RGB")
+        _BG_CACHE[off] = img
+    return img
+
+
+def _particles():
+    import random
+    rnd = random.Random(42)
+    return [(rnd.uniform(0, W), rnd.uniform(0, H), rnd.uniform(8, 26), rnd.choice([2, 2, 3, 3, 4]),
+             rnd.uniform(0, 6.28), rnd.random() < 0.18) for _ in range(42)]
+
+
+PARTICLES = _particles()
+
+
+def draw_particles(frame, t):
+    d = ImageDraw.Draw(frame)
+    for x0, y0, sp, r, ph, warm in PARTICLES:
+        y = (y0 - sp * t) % (H + 40) - 20
+        x = x0 + 18 * math.sin(t * 0.25 + ph)
+        tw = 0.6 + 0.4 * math.sin(t * 1.3 + ph * 3)
+        col = (int(70 * tw), int(56 * tw), int(26 * tw)) if warm else (int(38 * tw), int(50 * tw), int(72 * tw))
+        d.ellipse((x - r, y - r, x + r, y + r), fill=col)
+
+
+@lru_cache(maxsize=16)
+def tracker_sprite(text):
+    f = font("mono", 26, 700)
+    w = int(spaced_w(f, text, 4)) + 10
+    img = Image.new("RGBA", (w, 40), (0, 0, 0, 0))
+    spaced(ImageDraw.Draw(img), (4, 4), text, f, C["muted"] + (200,), 4)
     return img

@@ -3,7 +3,7 @@ Royalty-free by construction: everything is synthesised here."""
 import numpy as np
 
 SR = 48000
-BPM = 96
+BPM = 112
 BEAT = 60 / BPM
 BAR = 4 * BEAT
 CHORDS = [  # (root midi, chord tones midi)
@@ -75,6 +75,16 @@ def block(variant, rng):
                 seg = slice(st, min(st + an, n))
                 L[seg] += note[: seg.stop - seg.start] * (1 - pan)
                 R[seg] += note[: seg.stop - seg.start] * pan
+        # kick on every beat (driving variants)
+        if variant >= 2:
+            for b in range(8):
+                kn = int(0.25 * SR)
+                st = s + int(b * BEAT * SR)
+                t = np.arange(kn) / SR
+                f = 45 + 90 * np.exp(-t / 0.04)
+                k = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.12) * 0.32
+                L[st:st + kn] += k[: len(L[st:st + kn])]
+                R[st:st + kn] += k[: len(R[st:st + kn])]
         # hats on off-beats
         if variant >= 2:
             for k in range(16):
@@ -101,7 +111,7 @@ def simple_reverb(x):
 
 def soundtrack(duration, seed=7):
     rng = np.random.default_rng(seed)
-    order = [0, 1, 2, 2, 1, 2, 2, 1]
+    order = [1, 2, 2, 2, 1, 2, 2, 2]
     blocks, total, i = [], 0.0, 0
     while total < duration + BLOCK:
         blocks.append(block(order[i % len(order)], rng))
@@ -144,4 +154,53 @@ def pop():
     t = np.arange(n) / SR
     f = 220 + 500 * np.exp(-t / 0.03)
     s = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.05) * 0.3
+    return np.stack([s, s], 1)
+
+
+def swish():
+    rng = np.random.default_rng(3)
+    n = int(0.22 * SR)
+    t = np.arange(n) / SR
+    nz = rng.standard_normal(n)
+    out = np.zeros(n)
+    y = 0.0
+    for i in range(n):
+        a = 0.05 + 0.6 * (i / n)
+        y = y + a * (nz[i] - y)
+        out[i] = nz[i] - y  # high-passed, rising
+    e = np.sin(np.pi * t / t[-1]) ** 3
+    s = out * e * 0.10
+    return np.stack([s, s], 1)
+
+
+def thud():
+    n = int(0.35 * SR)
+    t = np.arange(n) / SR
+    f = 50 + 110 * np.exp(-t / 0.03)
+    s = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.1) * 0.55
+    rng = np.random.default_rng(5)
+    s += rng.standard_normal(n) * np.exp(-t / 0.015) * 0.12
+    return np.stack([s, s], 1)
+
+
+def ding():
+    n = int(0.9 * SR)
+    t = np.arange(n) / SR
+    s = (np.sin(2 * np.pi * 1318.5 * t) + 0.6 * np.sin(2 * np.pi * 1975.5 * t)) * np.exp(-t / 0.28) * 0.16
+    s[int(0.08 * SR):] += (np.sin(2 * np.pi * 1760 * t) * np.exp(-t / 0.3) * 0.12)[: n - int(0.08 * SR)]
+    return np.stack([s, s], 1)
+
+
+def riser(length=1.1):
+    rng = np.random.default_rng(9)
+    n = int(length * SR)
+    t = np.arange(n) / SR
+    nz = rng.standard_normal(n)
+    out = np.zeros(n)
+    y = 0.0
+    for i in range(n):
+        a = 0.01 + 0.4 * (i / n) ** 2
+        y = y + a * (nz[i] - y)
+        out[i] = y
+    s = out * (t / length) ** 2 * 0.5
     return np.stack([s, s], 1)

@@ -1,6 +1,6 @@
 # The AI Bubble in Europe: I Replayed the Dot-Com Crash on Your World ETF
 
-Duration: 25:00
+Duration: 20:20
 
 ## Alternative titles (A/B)
 - If the AI Bubble Pops, What Happens to Your MSCI World ETF? (Euro Data 1999–2026)
@@ -19,13 +19,13 @@ In this video:
 
 ⏱ Chapters
 0:00 €440 billion you didn't know you owned
-1:39 1. What you really own
-4:35 2. We've been here before
-7:45 3. The replay
-11:24 4. The currency trap
-14:11 5. The stress test
-18:28 6. What actually protected you
-21:15 7. The number that matters
+1:23 1. What you really own
+3:53 2. We've been here before
+6:26 3. The replay
+9:27 4. The currency trap
+11:27 5. The stress test
+14:59 6. What actually protected you
+17:14 7. The number that matters
 
 📊 Data & sources
 • MSCI World Net (EUR), annual returns 2000–2025 + 2026 YTD to 31 Aug, 0.2% yearly fee
