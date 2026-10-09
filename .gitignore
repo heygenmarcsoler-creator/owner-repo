@@ -3,3 +3,5 @@ video/build/
 video/output/preview_*.mp4
 .env
 *.pcm
+# 4K upload file is committed split into <100 MB parts in video/output/v4_4k/
+video/output/video_v4_4k.mp4
