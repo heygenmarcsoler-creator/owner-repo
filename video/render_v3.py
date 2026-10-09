@@ -293,8 +293,11 @@ def sp_vbars(e, p=1.0, now=None):
     fv = font("mono", 36, 800)
     x0 = (img.width - W2) / 2
     d.line((x0 - 20, H2, x0 + W2 + 20, H2), fill=C["line"] + (255,), width=2)
+    vis = e.get("_vis")
     for i, (lab, v, disp, col) in enumerate(items):
         q = ease(p * n - i * 0.7) if p < 1 else 1.0
+        if vis is not None:
+            q = ease(vis[i])
         q = max(0.0, min(1.0, q))
         x = x0 + i * (bw + gap)
         bh = (H2 - 70) * v / maxv * q
@@ -697,7 +700,7 @@ ANIM = dict(cnt=0.9, cards=0.9, bars=0.7, vbars=1.1, waffle=0.9, donut=1.0, chip
 
 
 def key_of(e):
-    return json.dumps({k: v for k, v in e.items() if k not in ("at", "_hp", "_rp")}, sort_keys=True, default=str)
+    return json.dumps({k: v for k, v in e.items() if k not in ("at", "_hp", "_rp", "_vis")}, sort_keys=True, default=str)
 
 
 _CACHE = {}
@@ -918,6 +921,12 @@ def dyn_sprite(e, s, t, ta):
         e2["_rp"] = rp
         if since < 1.6:
             return sprite(e2, min(1.0, since / 1.0), now=t)
+        return None
+    if k == "vbars" and e.get("steps"):
+        ts = [(marker_time(s, m) if m else s["start"] + 0.15) for m in e["steps"]]
+        vis = [max(0.0, min(1.0, (t - (ti if ti is not None else s["start"])) / 0.8)) for ti in ts]
+        if min(vis) < 1:
+            return sprite(dict(e, _vis=vis), 1.0, now=t)
         return None
     if k == "endcard":
         return sprite(e, 1.0, now=since)
