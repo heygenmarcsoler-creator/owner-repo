@@ -8,7 +8,8 @@ from sphinx_norm import normalise
 EXTRA = {
     "broadcom": "B R AO D K AA M", "bucket's": "B AH K AH T S", "covid": "K OW V IH D",
     "etf": "IY T IY EH F", "etf's": "IY T IY EH F S", "etfs": "IY T IY EH F S",
-    "maths": "M AE TH S", "stoxx": "S T AA K S",
+    "maths": "M AE TH S", "stoxx": "S T AA K S", "factsheet": "F AE K T SH IY T",
+    "rebalanced": "R IY B AE L AH N S T", "sum's": "S AH M Z",
 }
 
 
@@ -32,7 +33,7 @@ def align(path, tokens):
     if d.hyp() is None:
         raise RuntimeError("alignment failed")
     got = [(seg.word.split("(")[0], seg.start_frame / 100, (seg.end_frame + 1) / 100) for seg in d.seg()]
-    words = [g for g in got if not g[0].startswith("<") and g[0] not in ("[noise]", "sil")]
+    words = [g for g in got if not g[0].startswith(("<", "[", "+")) and g[0].lower() not in ("sil",)]
     if len(words) != len(flat):
         raise RuntimeError(f"alignment length mismatch {len(words)} != {len(flat)}")
     out, i = [], 0
