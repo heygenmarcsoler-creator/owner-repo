@@ -1,4 +1,4 @@
-"""v3 renderer — EuroindexLab long-form format (16:9, no word captions).
+"""v3/v4 renderer — EuroindexLab long-form format (16:9, no word captions).
 
   python3 render_v3.py timeline        # align + timeline + audio mix
   python3 render_v3.py render [t0 t1]  # frames -> MP4 (optionally a time range)
@@ -22,17 +22,53 @@ import music
 from script_v3 import SEGMENTS, CHUNK_STARTS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BUILD = os.path.join(HERE, "build", "v3")
-TTS = os.path.join(HERE, "build", "tts_v3")
+BUILD = os.path.join(HERE, "build", os.environ.get("BUILD_DIR", "v4"))
+TTS = os.path.join(HERE, "build", os.environ.get("TTS_DIR", "tts_v4"))
 OUT = os.path.join(HERE, "output")
 SR = 24000
 W, H, FPS = 1920, 1080, 30
 TARGET = float(os.environ.get("TARGET_SECONDS", 1800))
-TEMPO = float(os.environ.get("TEMPO", 0.92))
+PART_CRF = int(os.environ.get("PART_CRF", 12))  # near-lossless 4:4:4 intermediate; exports re-encode
+TEMPO = float(os.environ.get("TEMPO", 1.0))  # 1.0 = natural speed (time-stretching made the voice robotic)
 TTS_SLOW = os.path.join(HERE, "build", "tts_v3_slow")
 
 
+def tight_path(path, max_sil=1.2, keep=0.9, floor_db=-45):
+    """Natural-speed voice: only shorten silent stretches longer than max_sil seconds to keep seconds."""
+    out_dir = TTS + "_tight"
+    os.makedirs(out_dir, exist_ok=True)
+    dst = os.path.join(out_dir, os.path.basename(path))
+    if os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(path):
+        return dst
+    a = read_wav(path)
+    fr = int(0.02 * SR)
+    n = len(a) // fr
+    db = 20 * np.log10(np.sqrt((a[:n * fr].reshape(n, fr) ** 2).mean(1)) + 1e-9)
+    pieces, last, i = [], 0, 0
+    while i < n:
+        if db[i] < floor_db:
+            j = i
+            while j < n and db[j] < floor_db:
+                j += 1
+            if (j - i) * 0.02 > max_sil:
+                half = int(keep / 2 * SR)
+                a0, a1 = i * fr + half, j * fr - half
+                pieces.append(a[last:a0])
+                last = a1
+            i = j
+        else:
+            i += 1
+    pieces.append(a[last:])
+    y = np.concatenate(pieces)
+    with wave.open(dst, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
+        w.writeframes((np.clip(y, -1, 1) * 32767).astype("<i2").tobytes())
+    return dst
+
+
 def slow_path(path):
+    if abs(TEMPO - 1.0) < 1e-6:
+        return tight_path(path)
     os.makedirs(TTS_SLOW, exist_ok=True)
     dst = os.path.join(TTS_SLOW, os.path.basename(path).replace(".wav", f"_{TEMPO:.3f}.wav"))
     if not os.path.exists(dst):
@@ -74,6 +110,49 @@ def back(x):
 
 
 # ------------------------------------------------------------------ background (clean, radial glow)
+SSAA = 4
+_AA_CACHE = {}
+
+
+def _aa_shape(orig, draw, xy, kw):
+    """Draw a shape 4x supersampled and composite it, so edges are anti-aliased."""
+    img = getattr(draw, "_image", None)
+    if img is None or img.mode != "RGBA":
+        return orig(draw, xy, **kw)
+    (x0, y0), (x1, y1) = xy if len(xy) == 2 else ((xy[0], xy[1]), (xy[2], xy[3]))
+    if x1 < x0 or y1 < y0:
+        return orig(draw, xy, **kw)
+    bx0, by0 = int(math.floor(x0)) - 1, int(math.floor(y0)) - 1
+    bw, bh = int(math.ceil(x1)) + 2 - bx0, int(math.ceil(y1)) + 2 - by0
+    key = (orig.__name__, bw, bh, round(x0 - bx0, 2), round(y0 - by0, 2), round(x1 - bx0, 2), round(y1 - by0, 2),
+           tuple(sorted((k, v if not isinstance(v, list) else tuple(v)) for k, v in kw.items())))
+    small = _AA_CACHE.get(key)
+    if small is None:
+        layer = Image.new("RGBA", (bw * SSAA, bh * SSAA), (0, 0, 0, 0))
+        kw2 = dict(kw)
+        if kw2.get("radius"):
+            kw2["radius"] = kw2["radius"] * SSAA
+        if kw2.get("width"):
+            kw2["width"] = int(round(kw2["width"] * SSAA))
+        box = ((x0 - bx0) * SSAA, (y0 - by0) * SSAA, (x1 - bx0 + 1) * SSAA - 1, (y1 - by0 + 1) * SSAA - 1)
+        orig(ImageDraw.Draw(layer), box, **kw2)
+        small = layer.resize((bw, bh), Image.BOX)
+        if len(_AA_CACHE) > 150:
+            _AA_CACHE.clear()
+        _AA_CACHE[key] = small
+    if bx0 < 0 or by0 < 0:
+        small = small.crop((max(0, -bx0), max(0, -by0), bw, bh))
+        bx0, by0 = max(0, bx0), max(0, by0)
+    if bx0 >= img.width or by0 >= img.height:
+        return
+    small = small.crop((0, 0, min(small.width, img.width - bx0), min(small.height, img.height - by0)))
+    img.alpha_composite(small, (bx0, by0))
+
+
+_RRECT, _ELLIPSE = ImageDraw.ImageDraw.rounded_rectangle, ImageDraw.ImageDraw.ellipse
+ImageDraw.ImageDraw.rounded_rectangle = lambda self, xy, **kw: _aa_shape(_RRECT, self, xy, kw)
+ImageDraw.ImageDraw.ellipse = lambda self, xy, **kw: _aa_shape(_ELLIPSE, self, xy, kw)
+
 _BG = None
 
 
@@ -90,7 +169,8 @@ def background():
         base += (np.clip(1 - d, 0, 1) ** 2)[..., None] * np.array([10, 16, 28], np.float32)
         dv = np.sqrt(((xx - W / 2) / (W * 0.7)) ** 2 + ((yy - H / 2) / (H * 0.75)) ** 2)
         base *= (1 - 0.3 * np.clip(dv - 0.45, 0, 1))[..., None]
-        _BG = Image.fromarray(np.clip(base, 0, 255).astype("uint8"), "RGB")
+        base += np.random.default_rng(7).uniform(-0.5, 0.5, base.shape).astype(np.float32)
+        _BG = Image.fromarray(np.clip(np.round(base), 0, 255).astype("uint8"), "RGB")
     return _BG
 
 
@@ -134,10 +214,21 @@ def alpha_img(img, a):
     return img
 
 
+_SC_CACHE = {}
+
+
 def scaled(img, s):
     if abs(s - 1) < 0.004:
         return img
-    return img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))), Image.BILINEAR)
+    key = (id(img), round(s, 4))
+    hit = _SC_CACHE.get(key)
+    if hit is not None and hit[0] is img:
+        return hit[1]
+    out = img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))), Image.LANCZOS)
+    if len(_SC_CACHE) > 40:
+        _SC_CACHE.clear()
+    _SC_CACHE[key] = (img, out)
+    return out
 
 
 def glow_text(text, f, col, radius=22, strength=0.55):
@@ -856,7 +947,9 @@ def appear_time(s, e, k):
             return t - 0.08
     if persists(s["seg"], e):
         return -1e9
-    return s["start"] + 0.15 + 0.09 * k
+    i = s["seg"]
+    new_section = i > 0 and SEGMENTS[i - 1]["kicker"] != SEGMENTS[i]["kicker"]
+    return s["start"] + (0.34 if new_section else 0.15) + 0.09 * k
 
 
 # ------------------------------------------------------------------ layout
@@ -971,8 +1064,11 @@ def content_layer(si, s, t):
 
 
 def cam(s, t):
-    span = max(0.5, s["end"] - s["start"])
-    return 1.0 + 0.018 * eio((t - s["start"]) / span)
+    i = s["seg"]
+    if i > 0 and SEGMENTS[i - 1]["kicker"] == SEGMENTS[i]["kicker"]:
+        return 1.0
+    x = (t - s["start"]) / 0.7
+    return 1.0 if x >= 1 else 0.965 + 0.035 * eio(max(0.0, x))
 
 
 def zoomed(layer, z):
@@ -1014,7 +1110,7 @@ def render_frame(t, si):
     first_persist = bool(seg["elements"]) and persists(s["seg"], seg["elements"][0]) and not seg["elements"][0].get("at")
     # outgoing content
     if si > 0 and not first_persist:
-        dur = 0.4 if new_section else 0.28
+        dur = 0.32 if new_section else 0.28
         if tt < dur:
             p = eio(tt / dur)
             fl = final_layer(si - 1)
@@ -1064,8 +1160,8 @@ def render_range(args):
     load_tl()
     segs = TL["segments"]
     p = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-                          "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "24",
-                          "-tune", "animation", "-pix_fmt", "yuv420p", "-threads", "2", path], stdin=subprocess.PIPE)
+                          "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", str(PART_CRF),
+                          "-tune", "animation", "-pix_fmt", "yuv444p", "-threads", "2", path], stdin=subprocess.PIPE)
     si = 0
     for f in range(f0, f1):
         t = f / FPS
@@ -1081,24 +1177,48 @@ def render_range(args):
     return path
 
 
-def render(t0=None, t1=None, workers=4, name="video_v3.mp4"):
+def render(t0=None, t1=None, workers=4, name="master.mp4"):
+    """Frames -> near-lossless 4:4:4 master (BUILD/master.mp4). Use export() for the files to watch/upload."""
     load_tl()
     os.makedirs(OUT, exist_ok=True)
     f0 = int((t0 or 0) * FPS)
     f1 = int((t1 if t1 is not None else TL["total"]) * FPS)
     n = workers * 4
     step = math.ceil((f1 - f0) / n)
-    jobs = [(a, min(a + step, f1), os.path.join(BUILD, f"part_{i:02d}.mp4")) for i, a in enumerate(range(f0, f1, step))]
+    tag = "" if t0 is None else f"r{f0}_"
+    jobs = [(a, min(a + step, f1), os.path.join(BUILD, f"part_{tag}{i:02d}.mp4")) for i, a in enumerate(range(f0, f1, step))]
     with mp.Pool(workers) as pool:
         parts = pool.map(render_range, jobs, chunksize=1)
     lst = os.path.join(BUILD, "parts.txt")
     open(lst, "w").write("".join(f"file '{p}'\n" for p in parts))
-    out = os.path.join(OUT, name)
+    out = os.path.join(BUILD, name)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst,
-                    "-ss", f"{(t0 or 0):.3f}", "-t", f"{(f1 - f0) / FPS:.3f}", "-i", os.path.join(BUILD, "mix.m4a"),
-                    "-map", "0:v", "-map", "1:a", "-c", "copy", "-movflags", "+faststart", "-shortest", out], check=True)
-    print("video:", out)
-    return out
+                    "-ss", f"{(t0 or 0):.3f}", "-t", f"{(f1 - f0) / FPS:.3f}", "-i", os.path.join(BUILD, "mix.wav"),
+                    "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "pcm_s16le", "-shortest",
+                    out.replace(".mp4", ".mov")], check=True)
+    print("master:", out.replace(".mp4", ".mov"))
+    return out.replace(".mp4", ".mov")
+
+
+def export(master=None, name="video_v4"):
+    """master -> (1) 4K upload file for YouTube (lanczos 2x, high bitrate) and (2) a <95 MB 1080p file."""
+    master = master or os.path.join(BUILD, "master.mov")
+    dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", master],
+                               capture_output=True, text=True, check=True).stdout)
+    up = os.path.join(OUT, f"{name}_4k.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", master, "-vf", "scale=3840:2160:flags=lanczos,format=yuv420p",
+                    "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-tune", "animation", "-profile:v", "high",
+                    "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", up], check=True)
+    print("4K:", up)
+    small = os.path.join(OUT, f"{name}.mp4")
+    vb = int((95 * 8 * 1024 * 1024 / dur - 160000) / 1000)
+    common = ["-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "slow", "-tune", "animation", "-b:v", f"{vb}k"]
+    log = os.path.join(BUILD, "x264_2pass")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", master, *common, "-pass", "1", "-passlogfile", log, "-an",
+                    "-f", "mp4", "/dev/null"], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", master, *common, "-pass", "2", "-passlogfile", log,
+                    "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", small], check=True)
+    print(f"1080p ({vb} kb/s):", small)
 
 
 # ------------------------------------------------------------------ audio
@@ -1178,12 +1298,12 @@ def build_audio():
     with wave.open(mpath, "wb") as w:
         w.setnchannels(2); w.setsampwidth(2); w.setframerate(music.SR)
         w.writeframes((stereo * 32767).astype("<i2").tobytes())
-    apath = os.path.join(BUILD, "mix.m4a")
+    apath = os.path.join(BUILD, "mix.wav")
     fc = ("[0:a]aresample=48000,loudnorm=I=-16:TP=-2:LRA=9,pan=stereo|c0=c0|c1=c0,asplit=2[v][vs];"
           "[1:a]volume=0.55[m];[m][vs]sidechaincompress=threshold=0.03:ratio=3:attack=30:release=500[md];"
           "[v][md]amix=inputs=2:normalize=0:duration=longest,loudnorm=I=-14:TP=-1.5:LRA=11,apad[out]")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", vpath, "-i", mpath, "-filter_complex", fc, "-map", "[out]",
-                    "-t", f"{total:.3f}", "-c:a", "aac", "-b:a", "128k", apath], check=True)
+                    "-t", f"{total:.3f}", "-ar", "48000", "-c:a", "pcm_s16le", apath], check=True)
     print("audio:", apath)
 
 
@@ -1194,4 +1314,6 @@ if __name__ == "__main__":
         build_audio()
     if cmd in ("render", "all"):
         a = [float(v) for v in sys.argv[2:4]]
-        render(*(a or [None, None]), name=(f"preview_v3_{int(a[0])}_{int(a[1])}.mp4" if a else "video_v3.mp4"))
+        render(*(a or [None, None]), name=(f"preview_{int(a[0])}_{int(a[1])}.mp4" if a else "master.mp4"))
+    if cmd in ("export", "all"):
+        export()

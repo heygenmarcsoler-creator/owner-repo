@@ -1,11 +1,12 @@
-"""YouTube metadata for the 30-minute v3 video, in the channel's own description format."""
+"""YouTube metadata for the 30-minute v3/v4 video, in the channel's own description format."""
 import json
 import os
 
 from script_v3 import SEGMENTS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TL = json.load(open(os.path.join(HERE, "build", "v3", "timeline.json")))
+BUILD_DIR = os.environ.get("BUILD_DIR", "v4")
+TL = json.load(open(os.path.join(HERE, "build", BUILD_DIR, "timeline.json")))
 N = json.load(open(os.path.join(HERE, "build", "v3_numbers.json")))
 
 TITLE = "The AI Bubble in Europe: I Replayed the Dot-Com Crash on Your World ETF (Full Analysis)"
@@ -57,7 +58,9 @@ def description():
         "• €10,000 at the end of 1999: €5,515 by end 2002, back above €10,000 only in 2013, about €46,000 by August 2026",
         f"• {N['heat_negative']} of {N['heat_cells']} start-year × holding-period combinations (2000–2016, 1–10 years) lost money",
         "• €300 a month from January 2000: €96,000 in, about €416,000 today; pausing 2009–2013 cost about €108,000",
+        "• The monthly plan was back in profit 3 years after the 2002 bottom (2 years after 2008); the lump sum needed 13",
         "• Full dot-com replay on today's weights: MSCI World −45%, All-World −45%, equal weight −38%, 60/40 −24%",
+        "• Climbing back at each portfolio's own historical growth: ≈10.5 years for MSCI World, ≈5.5 years for 60/40",
         f"• 10,000 futures starting with a 2000–2002 crash: median {N['mc_crash_recover_median_years']:.0f} years to break even, "
         f"{N['mc_crash_not_recovered_20y_pct']}% not back within 20 years",
         "• Selling at the end of 2002: €8,813 today vs €46,032 for staying invested",
@@ -89,7 +92,7 @@ def main():
             "lump sum vs DCA", "concentration risk"]
     md = [f"# {TITLE}", "", f"Duration: {ts(TL['total'])}", "", "## Description", "", "```", desc, "```", "",
           "## Tags", "", ", ".join(tags), ""]
-    open(os.path.join(HERE, "output", "youtube_metadata_v3.md"), "w").write("\n".join(md))
+    open(os.path.join(HERE, "output", f"youtube_metadata_{BUILD_DIR}.md"), "w").write("\n".join(md))
     print("\n".join(f"{a} {b}" for a, b in ch))
 
 

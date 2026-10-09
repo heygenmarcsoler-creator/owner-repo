@@ -43,7 +43,13 @@ def synth(text, key):
             "Content-Type": "application/json", "x-goog-api-key": key})
         try:
             r = json.load(urllib.request.urlopen(req, timeout=600))
-            return base64.b64decode(r["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
+            raw = base64.b64decode(r["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
+            if raw[:4] == b"RIFF":  # newer TTS models return a WAV file instead of raw PCM
+                import io
+                with wave.open(io.BytesIO(raw)) as w:
+                    assert (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (24000, 1, 2)
+                    raw = w.readframes(w.getnframes())
+            return raw
         except urllib.error.HTTPError as e:
             msg = e.read().decode(errors="replace")
             m = re.search(r"retry in ([\d.]+)s", msg)
