@@ -941,6 +941,8 @@ def persists(i, e):
 
 
 def appear_time(s, e, k):
+    if e["kind"] == "heat" and persists(s["seg"], e):
+        return -1e9  # the heatmap stays on screen; its 'at' only times the highlight
     if e.get("at"):
         t = marker_time(s, e["at"])
         if t is not None:
