@@ -1244,16 +1244,19 @@ def render(t0=None, t1=None, workers=4, name="master.mp4"):
     return out.replace(".mp4", ".mov")
 
 
-def export(master=None, name="video_v4"):
+def export(master=None, name="video_v4", which=("4k", "1080p")):
     """master -> (1) 4K upload file for YouTube (lanczos 2x, high bitrate) and (2) a <95 MB 1080p file."""
     master = master or os.path.join(BUILD, "master.mov")
     dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", master],
                                capture_output=True, text=True, check=True).stdout)
-    up = os.path.join(OUT, f"{name}_4k.mp4")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", master, "-vf", "scale=3840:2160:flags=lanczos,format=yuv420p",
-                    "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-tune", "animation", "-profile:v", "high",
-                    "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", up], check=True)
-    print("4K:", up)
+    if "4k" in which:
+        up = os.path.join(OUT, f"{name}_4k.mp4")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", master, "-vf", "scale=3840:2160:flags=lanczos,format=yuv420p",
+                        "-c:v", "libx264", "-preset", "medium", "-crf", "17", "-tune", "animation", "-profile:v", "high",
+                        "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", up], check=True)
+        print("4K:", up)
+    if "1080p" not in which:
+        return
     small = os.path.join(OUT, f"{name}.mp4")
     vb = int((95 * 8 * 1024 * 1024 / dur - 160000) / 1000)
     common = ["-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "slow", "-tune", "animation", "-b:v", f"{vb}k"]
@@ -1360,4 +1363,4 @@ if __name__ == "__main__":
         a = [float(v) for v in sys.argv[2:4]]
         render(*(a or [None, None]), name=(f"preview_{int(a[0])}_{int(a[1])}.mp4" if a else "master.mp4"))
     if cmd in ("export", "all"):
-        export()
+        export(which=tuple(sys.argv[2:]) or ("4k", "1080p"))
