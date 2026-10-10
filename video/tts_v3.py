@@ -1,4 +1,8 @@
-"""Gemini TTS for the v3/v4 (channel-format) script: one request per chunk, natural speed (no time-stretch)."""
+"""Gemini TTS for the v3/v4 (channel-format) script: one request per chunk, natural speed (no time-stretch).
+
+Note: gemini-3.8-flash-tts sometimes reads the style instruction aloud before the script. render_v3.clean_path()
+detects that with speech recognition and cuts it before alignment, so always check build/tts_v4_clean.
+"""
 import json
 import os
 import re

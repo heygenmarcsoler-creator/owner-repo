@@ -33,6 +33,48 @@ TEMPO = float(os.environ.get("TEMPO", 1.0))  # 1.0 = natural speed (time-stretch
 TTS_SLOW = os.path.join(HERE, "build", "tts_v3_slow")
 
 
+INSTRUCTION_WORDS = {"script", "narrator", "documentary", "investors", "presenter", "finance", "instruction"}
+
+
+def reads_instruction(path, seconds=25):
+    """True if the TTS model read its style instruction aloud at the start of this chunk."""
+    from pocketsphinx import Decoder
+    from sphinx_align import pcm16k
+    pcm = pcm16k(path)[: seconds * 16000 * 2]
+    d = Decoder(samprate=16000, loglevel="FATAL")
+    d.start_utt(); d.process_raw(pcm, full_utt=True); d.end_utt()
+    heard = set(d.hyp().hypstr.split()) if d.hyp() else set()
+    return len(heard & INSTRUCTION_WORDS) >= 2
+
+
+def clean_path(path, ids):
+    """Cut the spoken style instruction (if any) from the start of a TTS chunk."""
+    from sphinx_align import align
+    import tts_v3
+    out_dir = TTS + "_clean"
+    os.makedirs(out_dir, exist_ok=True)
+    dst = os.path.join(out_dir, os.path.basename(path))
+    if os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(path):
+        return dst
+    a = read_wav(path)
+    cut = 0.0
+    if reads_instruction(path):
+        instr = tts_v3.T.STYLE.split()
+        toks = instr + [w for si in ids for w in spoken(SEGMENTS[si]["text"]).split()]
+        times = align(path, toks)
+        t_end, t_first = times[len(instr) - 1][1], times[len(instr)][0]
+        # cut in the quietest 20 ms just before the first script word
+        fr = int(0.02 * SR)
+        lo, hi = int(t_end * SR), max(int(t_end * SR) + fr, int(t_first * SR) - fr)
+        best = min(range(lo, hi, fr), key=lambda i: float((a[i:i + fr] ** 2).mean()))
+        cut = best / SR
+        print(f"  {os.path.basename(path)}: spoken instruction removed (first {cut:.1f}s)")
+    with wave.open(dst, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
+        w.writeframes((np.clip(a[int(cut * SR):], -1, 1) * 32767).astype("<i2").tobytes())
+    return dst
+
+
 def tight_path(path, max_sil=1.2, keep=0.9, floor_db=-45):
     """Natural-speed voice: only shorten silent stretches longer than max_sil seconds to keep seconds."""
     out_dir = TTS + "_tight"
@@ -865,7 +907,7 @@ def build_timeline():
         if not os.path.exists(path):
             print("missing", path)
             break
-        path = slow_path(path)
+        path = slow_path(clean_path(path, ids))
         dur = len(read_wav(path)) / SR
         toks, starts = [], []
         for si in ids:
