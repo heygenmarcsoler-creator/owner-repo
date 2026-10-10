@@ -1,6 +1,6 @@
 # The AI Bubble in Europe: I Replayed the Dot-Com Crash on Your World ETF (Full Analysis)
 
-Duration: 29:54
+Duration: 28:57
 
 ## Description
 
@@ -11,19 +11,19 @@ One of the biggest losses in this replay wasn't caused by the market at all.
 
 CHAPTERS
 0:00 Intro
-1:45 What your world ETF really owns
-3:42 Is it a bubble? 2000 vs 2026
-5:32 Japan 1989 and the dot-com crash
-7:46 Round 1: €10,000 at the 1999 top
-10:14 Every start year × every holding period
-11:50 Round 2: €300 a month
-13:38 The currency layer
-15:16 Round 3: stress-testing 5 portfolios
-18:44 10,000 simulated futures
-22:16 What actually helped
-25:02 The price of panic
-26:32 My checklist
-27:32 Verdict
+1:27 What your world ETF really owns
+3:33 Is it a bubble? 2000 vs 2026
+5:05 Japan 1989 and the dot-com crash
+7:29 Round 1: €10,000 at the 1999 top
+9:45 Every start year × every holding period
+11:27 Round 2: €300 a month
+13:24 The currency layer
+15:09 Round 3: stress-testing 5 portfolios
+18:23 10,000 simulated futures
+21:42 What actually helped
+24:11 The price of panic
+25:49 My checklist
+26:40 Verdict
 
 KEY RESULTS (MSCI World, net, in EUR, 0.2% yearly fee)
 • €10,000 at the end of 1999: €5,515 by end 2002, back above €10,000 only in 2013, about €46,000 by August 2026
