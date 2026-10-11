@@ -2,6 +2,8 @@
 import math
 import os
 
+import numpy as np
+
 from PIL import Image, ImageDraw, ImageFilter
 
 import engine as E
@@ -106,15 +108,142 @@ def variant_b():
     return img
 
 
+def _smooth(pts, n=24):
+    """Monotone cubic (Fritsch-Carlson) through the yearly points: smooth, never overshoots the data."""
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    k = len(pts)
+    d = [(ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]) for i in range(k - 1)]
+    m = [d[0]] + [0.0 if d[i - 1] * d[i] <= 0 else (d[i - 1] + d[i]) / 2 for i in range(1, k - 1)] + [d[-1]]
+    for i in range(k - 1):
+        if d[i] == 0:
+            m[i] = m[i + 1] = 0.0
+        else:
+            a, b = m[i] / d[i], m[i + 1] / d[i]
+            r = a * a + b * b
+            if r > 9:
+                t = 3 / math.sqrt(r)
+                m[i], m[i + 1] = t * a * d[i], t * b * d[i]
+    out = []
+    for i in range(k - 1):
+        h = xs[i + 1] - xs[i]
+        for j in range(n):
+            t = j / n
+            h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+            out.append((xs[i] + t * h, h00 * ys[i] + h10 * h * m[i] + h01 * ys[i + 1] + h11 * h * m[i + 1]))
+    out.append(pts[-1])
+    return out
+
+
+def _glow(layer, radius, strength):
+    g = layer.filter(ImageFilter.GaussianBlur(radius))
+    a = g.getchannel("A").point(lambda v: int(min(255, v * strength)))
+    g.putalpha(a)
+    return g
+
+
 def variant_v4():
-    """Variant B without the 'AI BUBBLE?' stamp: the v4 title already says it (3 words on the thumbnail)."""
-    img = base()
-    crash_line(img, (1000, 230, 1860, 860), upto=2013.0, color="amber", width=14)
-    text(img, "€10,000 →", 120, (80, 110), family="mono", weight=800)
-    text(img, "13", 470, (60, 250), family="mono", weight=800, default="red", glow_=True)
-    text(img, "YEARS", 150, (95, 790), family="grotesk", weight=700)
-    bar(img)
-    return img
+    """v4: €10,000 at the 1999 top, 13 years under water. Big chart, red 'under water' area, no top bar."""
+    from data import MSCI_WORLD_EUR, lump_sum_path
+    S = 2
+    Wt, Ht = 1920 * S, 1080 * S
+    red, red_dk, green, white = (248, 82, 104), (190, 24, 52), (52, 211, 140), (241, 245, 250)
+    # background: navy gradient, red glow behind the hole, vignette
+    yy, xx = np.mgrid[0:Ht, 0:Wt].astype(np.float32)
+    bg = np.zeros((Ht, Wt, 3), np.float32)
+    t = (yy / Ht)[..., None]
+    bg[:] = np.array([13, 18, 30]) * (1 - t) + np.array([6, 8, 13]) * t
+    d = np.sqrt(((xx - Wt * 0.66) / (Wt * 0.42)) ** 2 + ((yy - Ht * 0.72) / (Ht * 0.55)) ** 2)
+    bg += (np.clip(1 - d, 0, 1) ** 2)[..., None] * np.array([70, 10, 22])
+    dv = np.sqrt(((xx - Wt / 2) / (Wt * 0.62)) ** 2 + ((yy - Ht / 2) / (Ht * 0.7)) ** 2)
+    bg *= (1 - 0.55 * np.clip(dv - 0.55, 0, 1))[..., None]
+    img = Image.fromarray(np.clip(bg, 0, 255).astype("uint8"), "RGB").convert("RGBA")
+    # chart geometry
+    vals = [round(v) for v in lump_sum_path(MSCI_WORLD_EUR)[:15]]  # 1999 .. 2013
+    years = list(range(1999, 2014))
+    cx0, cx1, cy0, cy1 = 1010 * S, 1860 * S, 150 * S, 940 * S
+    lo, hi = 4300, 11600
+    X_ = lambda y: cx0 + (y - 1999) / (2013 - 1999) * (cx1 - cx0)
+    Y_ = lambda v: cy0 + (1 - (v - lo) / (hi - lo)) * (cy1 - cy0)
+    base_y = Y_(10000)
+    pts = _smooth([(X_(y), Y_(v)) for y, v in zip(years, vals)])
+    # faint grid inside the chart
+    grid = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(grid)
+    for v in range(5000, 11001, 1000):
+        gd.line((cx0, Y_(v), cx1, Y_(v)), fill=(255, 255, 255, 14), width=2 * S)
+    img.alpha_composite(grid)
+    # under-water area: between the €10k line and the curve, red fading downwards
+    area = Image.new("L", img.size, 0)
+    ImageDraw.Draw(area).polygon([(cx0, base_y)] + pts + [(pts[-1][0], base_y)], fill=255)
+    below = Image.new("L", img.size, 0)
+    ImageDraw.Draw(below).rectangle((0, int(base_y), Wt, Ht), fill=255)
+    mask = Image.fromarray((np.asarray(area, np.float32) * np.asarray(below, np.float32) / 255).astype("uint8"))
+    grad = np.clip((yy - base_y) / (Y_(5300) - base_y), 0, 1)
+    fill_a = (np.asarray(mask, np.float32) / 255) * (60 + 120 * grad)
+    fill = np.zeros((Ht, Wt, 4), np.uint8)
+    fill[..., :3] = red_dk
+    fill[..., 3] = np.clip(fill_a, 0, 255).astype("uint8")
+    img.alpha_composite(Image.fromarray(fill, "RGBA"))
+    # €10k reference line (dashed)
+    ref = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    rd = ImageDraw.Draw(ref)
+    x = cx0 - 30 * S
+    while x < cx1 + 40 * S:
+        rd.line((x, base_y, min(x + 26 * S, cx1 + 40 * S), base_y), fill=(226, 232, 240, 150), width=4 * S)
+        x += 44 * S
+    img.alpha_composite(ref)
+    # the line: red while under water, green once it is back above €10k
+    cross = next(i for i, p in enumerate(pts) if i > len(pts) // 2 and p[1] <= base_y)
+    line = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(line)
+    ld.line(pts[:cross + 1], fill=red + (255,), width=13 * S, joint="curve")
+    ld.line(pts[cross:], fill=green + (255,), width=13 * S, joint="curve")
+    img.alpha_composite(_glow(line, 26 * S, 1.6))
+    img.alpha_composite(line)
+    # dots: start, low point, end
+    dots = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    dd = ImageDraw.Draw(dots)
+    sx, sy = pts[0]
+    dd.ellipse((sx - 15 * S, sy - 15 * S, sx + 15 * S, sy + 15 * S), fill=white + (255,))
+    ex, ey = pts[-1]
+    dd.ellipse((ex - 40 * S, ey - 40 * S, ex + 40 * S, ey + 40 * S), fill=green + (70,))
+    dd.ellipse((ex - 22 * S, ey - 22 * S, ex + 22 * S, ey + 22 * S), fill=green + (255,))
+    dd.ellipse((ex - 9 * S, ey - 9 * S, ex + 9 * S, ey + 9 * S), fill=white + (255,))
+    img.alpha_composite(_glow(dots, 18 * S, 1.2))
+    img.alpha_composite(dots)
+    # −45% pill under the 2002 low
+    lx, ly = X_(2002), Y_(vals[3])
+    fp = E.font("mono", 64 * S, 800)
+    txt = "−45%"
+    tw_ = ImageDraw.Draw(img).textlength(txt, font=fp)
+    pw, ph = tw_ + 56 * S, 100 * S
+    pill = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    pd = ImageDraw.Draw(pill)
+    px, py = lx - pw / 2, ly + 46 * S
+    pd.rounded_rectangle((px, py, px + pw, py + ph), radius=ph / 2, fill=red + (255,))
+    pd.text((px + 28 * S, py + 12 * S), txt, font=fp, fill=white + (255,))
+    img.alpha_composite(_glow(pill, 20 * S, 0.9))
+    img.alpha_composite(pill)
+    # headline: giant 13 with a red gradient + glow, YEARS in white
+    f13 = E.font("inter", 600 * S, 900)
+    m13 = Image.new("L", img.size, 0)
+    ImageDraw.Draw(m13).text((70 * S, 50 * S), "13", font=f13, fill=255)
+    g = np.clip((yy - 150 * S) / (650 * S), 0, 1)[..., None]
+    col = np.array([255, 120, 138], np.float32) * (1 - g) + np.array([214, 30, 62], np.float32) * g
+    t13 = np.zeros((Ht, Wt, 4), np.uint8)
+    t13[..., :3] = col.astype("uint8")
+    t13[..., 3] = np.asarray(m13)
+    t13 = Image.fromarray(t13, "RGBA")
+    img.alpha_composite(_glow(t13, 40 * S, 0.8))
+    img.alpha_composite(t13)
+    fy = E.font("inter", 190 * S, 900)
+    yrs = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(yrs).text((86 * S, 770 * S), "YEARS", font=fy, fill=white + (255,))
+    sh2 = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sh2.putalpha(yrs.getchannel("A").point(lambda v: int(v * 0.75)))
+    img.alpha_composite(sh2.filter(ImageFilter.GaussianBlur(14 * S)), (6 * S, 12 * S))
+    img.alpha_composite(yrs)
+    return img.resize((1920, 1080), Image.LANCZOS)
 
 
 def variant_c():
@@ -145,7 +274,8 @@ def main():
     only = sys.argv[1:]
     for name, fn in [v for v in variants if not only or v[0].split(".")[0].split("_")[-1] in only]:
         p = os.path.join(OUT, name)
-        fn().convert("RGB").resize((1280, 720), Image.LANCZOS).save(p, quality=93)
+        size = (1920, 1080) if name == "thumbnail_v4.jpg" else (1280, 720)
+        fn().convert("RGB").resize(size, Image.LANCZOS).save(p, quality=93)
         outs.append(p)
     print("\n".join(outs))
 
