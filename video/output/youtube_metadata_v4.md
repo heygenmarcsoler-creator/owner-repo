@@ -1,13 +1,15 @@
-# The AI Bubble in Europe: I Replayed the Dot-Com Crash on Your World ETF (Full Analysis)
+# Is AI a Bubble? I Replayed 2000 on Your World ETF
 
 Duration: 28:57
+
+Thumbnail: video/output/thumbnail_v4.jpg
 
 ## Description
 
 ```
-Is the AI boom a bubble, and what would it do to a European investor's world ETF? I replayed the dot-com crash with 27 years of real data in euros, stress-tested five popular portfolios and simulated 10,000 futures.
+Is AI a bubble, and what would a dot-com style crash do to your MSCI World ETF? I replayed 2000–2002 with 27 years of real euro data, stress-tested 5 portfolios and simulated 10,000 futures.
 
-One of the biggest losses in this replay wasn't caused by the market at all.
+The biggest loss in this replay wasn't caused by the market at all.
 
 CHAPTERS
 0:00 Intro
@@ -54,4 +56,4 @@ Voiceover: Google Gemini TTS. Music: original, made for this channel.
 
 ## Tags
 
-AI bubble, AI bubble Europe, dot com crash, MSCI World, MSCI World ETF, world ETF, VWCE, IWDA, ETF investing Europe, European investor, stock market crash, Monte Carlo simulation, 60/40 portfolio, lump sum vs DCA, concentration risk
+is AI a bubble, AI bubble, AI bubble 2026, dot com crash, MSCI World, MSCI World ETF, VWCE, IWDA, FTSE All-World, world ETF, ETF investing Europe, stock market crash, equal weight ETF, 60/40 portfolio, Monte Carlo simulation

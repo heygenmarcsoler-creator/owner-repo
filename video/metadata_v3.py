@@ -9,7 +9,8 @@ BUILD_DIR = os.environ.get("BUILD_DIR", "v4")
 TL = json.load(open(os.path.join(HERE, "build", BUILD_DIR, "timeline.json")))
 N = json.load(open(os.path.join(HERE, "build", "v3_numbers.json")))
 
-TITLE = "The AI Bubble in Europe: I Replayed the Dot-Com Crash on Your World ETF (Full Analysis)"
+TITLE = "Is AI a Bubble? I Replayed 2000 on Your World ETF"
+THUMBNAIL = "output/thumbnail_v4.jpg"
 CHAPTER_NAMES = {
     "THE AI BUBBLE IN EUROPE": "Intro",
     "WHAT YOU OWN": "What your world ETF really owns",
@@ -46,10 +47,10 @@ def chapters():
 def description():
     ch = chapters()
     lines = [
-        "Is the AI boom a bubble, and what would it do to a European investor's world ETF? I replayed the dot-com "
-        "crash with 27 years of real data in euros, stress-tested five popular portfolios and simulated 10,000 futures.",
+        "Is AI a bubble, and what would a dot-com style crash do to your MSCI World ETF? I replayed 2000–2002 "
+        "with 27 years of real euro data, stress-tested 5 portfolios and simulated 10,000 futures.",
         "",
-        "One of the biggest losses in this replay wasn't caused by the market at all.",
+        "The biggest loss in this replay wasn't caused by the market at all.",
         "",
         "CHAPTERS",
         *[f"{a} {b}" for a, b in ch],
@@ -87,11 +88,12 @@ def description():
 
 def main():
     desc, ch = description()
-    tags = ["AI bubble", "AI bubble Europe", "dot com crash", "MSCI World", "MSCI World ETF", "world ETF", "VWCE", "IWDA",
-            "ETF investing Europe", "European investor", "stock market crash", "Monte Carlo simulation", "60/40 portfolio",
-            "lump sum vs DCA", "concentration risk"]
-    md = [f"# {TITLE}", "", f"Duration: {ts(TL['total'])}", "", "## Description", "", "```", desc, "```", "",
-          "## Tags", "", ", ".join(tags), ""]
+    tags = ["is AI a bubble", "AI bubble", "AI bubble 2026", "dot com crash", "MSCI World", "MSCI World ETF", "VWCE",
+            "IWDA", "FTSE All-World", "world ETF", "ETF investing Europe", "stock market crash", "equal weight ETF",
+            "60/40 portfolio", "Monte Carlo simulation"]
+    assert len(desc) <= 5000 and len(", ".join(tags)) <= 500
+    md = [f"# {TITLE}", "", f"Duration: {ts(TL['total'])}", "", f"Thumbnail: video/{THUMBNAIL}", "",
+          "## Description", "", "```", desc, "```", "", "## Tags", "", ", ".join(tags), ""]
     open(os.path.join(HERE, "output", f"youtube_metadata_{BUILD_DIR}.md"), "w").write("\n".join(md))
     print("\n".join(f"{a} {b}" for a, b in ch))
 

@@ -57,10 +57,13 @@ def crash_line(img, box, upto=2008.0, color="red", width=16):
     r = 22 * S
     d.ellipse((ex - r, ey - r, ex + r, ey + r), fill=E.C[color] + (255,))
     layer = layer.resize((x1 - x0, y1 - y0), Image.LANCZOS)
-    g = layer.getchannel("A").filter(ImageFilter.GaussianBlur(22)).point(lambda v: int(v * 0.8))
-    gl = Image.new("RGBA", layer.size, E.C[color] + (0,))
+    P = 70  # room for the glow, so it is not cut into a square at the box edge
+    padded = Image.new("RGBA", (layer.width + 2 * P, layer.height + 2 * P), (0, 0, 0, 0))
+    padded.alpha_composite(layer, (P, P))
+    g = padded.getchannel("A").filter(ImageFilter.GaussianBlur(22)).point(lambda v: int(v * 0.8))
+    gl = Image.new("RGBA", padded.size, E.C[color] + (0,))
     gl.putalpha(g)
-    img.alpha_composite(gl, (x0, y0))
+    img.alpha_composite(gl.crop((max(0, P - x0), max(0, P - y0), gl.width, gl.height)), (max(0, x0 - P), max(0, y0 - P)))
     img.alpha_composite(layer, (x0, y0))
     # dashed €10k reference
     d2 = ImageDraw.Draw(img)
@@ -103,6 +106,17 @@ def variant_b():
     return img
 
 
+def variant_v4():
+    """Variant B without the 'AI BUBBLE?' stamp: the v4 title already says it (3 words on the thumbnail)."""
+    img = base()
+    crash_line(img, (1000, 230, 1860, 860), upto=2013.0, color="amber", width=14)
+    text(img, "€10,000 →", 120, (80, 110), family="mono", weight=800)
+    text(img, "13", 470, (60, 250), family="mono", weight=800, default="red", glow_=True)
+    text(img, "YEARS", 150, (95, 790), family="grotesk", weight=700)
+    bar(img)
+    return img
+
+
 def variant_c():
     """Versus: panic seller vs patient investor."""
     img = base()
@@ -123,9 +137,13 @@ def variant_c():
 
 
 def main():
+    import sys
     os.makedirs(OUT, exist_ok=True)
     outs = []
-    for name, fn in (("thumbnail.jpg", variant_a), ("thumbnail_b.jpg", variant_b), ("thumbnail_c.jpg", variant_c)):
+    variants = (("thumbnail.jpg", variant_a), ("thumbnail_b.jpg", variant_b), ("thumbnail_c.jpg", variant_c),
+                ("thumbnail_v4.jpg", variant_v4))
+    only = sys.argv[1:]
+    for name, fn in [v for v in variants if not only or v[0].split(".")[0].split("_")[-1] in only]:
         p = os.path.join(OUT, name)
         fn().convert("RGB").resize((1280, 720), Image.LANCZOS).save(p, quality=93)
         outs.append(p)
