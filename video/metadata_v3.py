@@ -2,7 +2,9 @@
 import json
 import os
 
-from script_v3 import SEGMENTS
+import importlib
+_SCRIPT = importlib.import_module(os.environ.get("SCRIPT_MODULE", "script_v3"))
+SEGMENTS = _SCRIPT.SEGMENTS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUILD_DIR = os.environ.get("BUILD_DIR", "v4")

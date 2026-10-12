@@ -9,7 +9,7 @@ EXTRA = {
     "broadcom": "B R AO D K AA M", "bucket's": "B AH K AH T S", "covid": "K OW V IH D",
     "etf": "IY T IY EH F", "etf's": "IY T IY EH F S", "etfs": "IY T IY EH F S",
     "maths": "M AE TH S", "stoxx": "S T AA K S", "factsheet": "F AE K T SH IY T",
-    "rebalanced": "R IY B AE L AH N S T", "sum's": "S AH M Z",
+    "rebalanced": "R IY B AE L AH N S T", "sum's": "S AH M Z", "warsh": "W AO R SH",
 }
 
 

@@ -19,7 +19,10 @@ from PIL import Image, ImageDraw, ImageFilter
 
 import engine as E
 import music
-from script_v3 import SEGMENTS, CHUNK_STARTS
+import importlib
+_SCRIPT = importlib.import_module(os.environ.get("SCRIPT_MODULE", "script_v3"))
+SEGMENTS = _SCRIPT.SEGMENTS
+CHUNK_STARTS = _SCRIPT.CHUNK_STARTS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUILD = os.path.join(HERE, "build", os.environ.get("BUILD_DIR", "v4"))
@@ -402,7 +405,10 @@ def sp_bars(e, p=1.0, now=None):
     pp = ease(p)
     for i, (lab, v, disp, col) in enumerate(items):
         y = i * rh
-        d.text((lab_w - 28 - tw(fl, lab), y + 22), lab, font=fl, fill=C["soft"] + (255,))
+        fl_ = fl
+        while tw(fl_, lab) > lab_w - 40 and fl_.size > 22:
+            fl_ = font("inter", fl_.size - 2, 500)
+        d.text((lab_w - 28 - tw(fl_, lab), y + 22 + (fl.size - fl_.size) / 2), lab, font=fl_, fill=C["soft"] + (255,))
         d.rounded_rectangle((lab_w, y + 22, lab_w + bar_w, y + rh - 22), radius=22, fill=C["panel"] + (255,))
         bw = max(10, bar_w * min(1, v / maxv) * pp)
         d.rounded_rectangle((lab_w, y + 22, lab_w + bw, y + rh - 22), radius=22, fill=C[col] + (255,))
@@ -419,10 +425,11 @@ def sp_vbars(e, p=1.0, now=None):
     gap = 44 if n > 6 else 80
     H2 = 520
     W2 = n * bw + (n - 1) * gap
-    img = Image.new("RGBA", (max(W2, 400), H2 + 80), (0, 0, 0, 0))
+    fl = font("mono", 30, 700)
+    over = max(0.0, max(tw(fl, lab) for lab, _, _, _ in items) - bw) / 2 + 10
+    img = Image.new("RGBA", (int(max(W2 + 2 * over, 400)), H2 + 80), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     maxv = e.get("maxv") or max(v for _, v, _, _ in items) * 1.15
-    fl = font("mono", 30, 700)
     fv = font("mono", 36, 800)
     x0 = (img.width - W2) / 2
     d.line((x0 - 20, H2, x0 + W2 + 20, H2), fill=C["line"] + (255,), width=2)
@@ -536,6 +543,8 @@ def sp_dots(e, p=1.0, now=None):
 
 
 def fmt_axis(v, e):
+    if e.get("fmt"):
+        return e["fmt"].format(v)
     if e.get("money"):
         return money(v)
     if e.get("dec"):
@@ -567,7 +576,10 @@ def sp_line(e, p=1.0, now=None):
         d.line((pad_l * S, yy, pad_l * S + pw, yy), fill=C["line"] + (150,), width=S)
         d.text((pad_l * S - 18 * S - tw(fy, lab), yy - 16 * S), lab, font=fy, fill=C["muted"] + (255,))
     for xt in e.get("xticks", []):
-        lab = f"{xt}y" if e.get("xlabel") == "years" else str(xt)
+        if isinstance(xt, (tuple, list)):
+            xt, lab = xt
+        else:
+            lab = f"{xt}y" if e.get("xlabel") == "years" else str(xt)
         d.text((X(xt) - tw(fy, lab) / 2, pad_t * S + ph + 22 * S), lab, font=fy, fill=C["muted"] + (255,))
     if e.get("ref") is not None:
         yy = Y(e["ref"])
@@ -760,10 +772,13 @@ def sp_timeline(e, p=1.0, now=None):
     d = ImageDraw.Draw(img)
     n = len(items)
     pp = ease(p) if p < 1 else 1.0
-    x0, x1, y = 80, W2 - 80, 140
-    d.line((x0, y, x0 + (x1 - x0) * min(1, pp * 1.1), y), fill=C["line"] + (255,), width=6)
     fy = font("mono", 42, 800)
     fl = font("inter", 32, 500)
+
+    def half(it):
+        return max([tw(fy, str(it[0]))] + [tw(fl, l) for l in it[1].split("\n")]) / 2 + 16
+    x0, x1, y = max(80, half(items[0])), W2 - max(80, half(items[-1])), 140
+    d.line((x0, y, x0 + (x1 - x0) * min(1, pp * 1.1), y), fill=C["line"] + (255,), width=6)
     for k, (year, lab, col) in enumerate(items):
         a = ease(pp * n - k) if pp < 1 else 1.0
         if a <= 0:
@@ -781,7 +796,7 @@ def sp_timeline(e, p=1.0, now=None):
 def sp_takeaways(e, p=1.0, now=None):
     items = e["items"]
     n = len(items)
-    cw, gap, ch = 500, 40, 330
+    cw, gap, ch = (500 if n <= 3 else 400), 40, 330
     img = Image.new("RGBA", (n * cw + (n - 1) * gap, ch + 30), (0, 0, 0, 0))
     hl = e.get("hl")
     fnum = font("mono", 64, 800)
@@ -933,7 +948,7 @@ def build_timeline():
     fixed = 0.6 + 3.0
     need = TARGET - speech - fixed
     unit = n_sec * base_sec + n_para * base_para + n_intra * base_intra
-    k = float(np.clip(need / unit, 1.0, 2.6)) if unit else 1.0
+    k = float(np.clip(need / unit, float(os.environ.get("GAP_MIN", 1.0)), 2.6)) if unit else 1.0
     t = 0.6
     for i, s in enumerate(segs):
         if i:

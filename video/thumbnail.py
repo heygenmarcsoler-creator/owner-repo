@@ -246,6 +246,74 @@ def variant_v4():
     return img.resize((1920, 1080), Image.LANCZOS)
 
 
+def variant_v5():
+    """v5: Trump wanted 1% (struck out) -> the Fed went to 4%. Fed funds step chart glowing behind."""
+    from script_v5 import FED_X, FED_Y
+    S = 2
+    Wt, Ht = 1920 * S, 1080 * S
+    red, slate, amber, white = (248, 82, 104), (120, 132, 156), (245, 158, 11), (241, 245, 250)
+    yy, xx = np.mgrid[0:Ht, 0:Wt].astype(np.float32)
+    bg = np.zeros((Ht, Wt, 3), np.float32)
+    t = (yy / Ht)[..., None]
+    bg[:] = np.array([13, 18, 30]) * (1 - t) + np.array([6, 8, 13]) * t
+    d = np.sqrt(((xx - Wt * 0.74) / (Wt * 0.38)) ** 2 + ((yy - Ht * 0.48) / (Ht * 0.6)) ** 2)
+    bg += (np.clip(1 - d, 0, 1) ** 2)[..., None] * np.array([75, 12, 26])
+    dv = np.sqrt(((xx - Wt / 2) / (Wt * 0.62)) ** 2 + ((yy - Ht / 2) / (Ht * 0.7)) ** 2)
+    bg *= (1 - 0.55 * np.clip(dv - 0.55, 0, 1))[..., None]
+    img = Image.fromarray(np.clip(bg, 0, 255).astype("uint8"), "RGB").convert("RGBA")
+    # Fed funds path behind the numbers (2022 -> Oct 2026), the last step up in red
+    cx0, cx1, cy0, cy1 = 60 * S, 1860 * S, 560 * S, 1010 * S
+    X_ = lambda x: cx0 + (x - FED_X[0]) / (FED_X[-1] - FED_X[0]) * (cx1 - cx0)
+    Y_ = lambda v: cy1 - v / 6 * (cy1 - cy0)
+    pts = [(X_(x), Y_(y)) for x, y in zip(FED_X, FED_Y)]
+    k = next(i for i in range(len(FED_X)) if FED_X[i] >= 2026.7)
+    line = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(line)
+    ld.line(pts[:k + 1], fill=amber + (210,), width=9 * S, joint="curve")
+    ld.line(pts[k:], fill=red + (255,), width=12 * S, joint="curve")
+    ex, ey = pts[-1]
+    ld.ellipse((ex - 22 * S, ey - 22 * S, ex + 22 * S, ey + 22 * S), fill=red + (255,))
+    # Trump's 1% as a dashed line
+    x = cx0
+    while x < cx1:
+        ld.line((x, Y_(1.0), min(x + 26 * S, cx1), Y_(1.0)), fill=(226, 232, 240, 110), width=4 * S)
+        x += 46 * S
+    img.alpha_composite(_glow(line, 24 * S, 1.3))
+    img.alpha_composite(line)
+    # "1%" struck out
+    f1 = E.font("inter", 400 * S, 900)
+    one = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(one)
+    od.text((90 * S, 40 * S), "1%", font=f1, fill=slate + (255,))
+    bb = od.textbbox((90 * S, 40 * S), "1%", font=f1)
+    yc = (bb[1] + bb[3]) / 2
+    strike = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(strike).line((bb[0] - 20 * S, yc + 50 * S, bb[2] + 20 * S, yc - 50 * S), fill=red + (255,), width=34 * S)
+    img.alpha_composite(one)
+    img.alpha_composite(_glow(strike, 18 * S, 1.0))
+    img.alpha_composite(strike)
+    # arrow
+    fa = E.font("inter", 230 * S, 800)
+    arr = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(arr).text((bb[2] + 50 * S, 120 * S), "→", font=fa, fill=white + (255,))
+    img.alpha_composite(arr)
+    # "4%" big, red gradient + glow
+    f4 = E.font("inter", 500 * S, 900)
+    m4 = Image.new("L", img.size, 0)
+    md = ImageDraw.Draw(m4)
+    b4 = md.textbbox((0, 0), "4%", font=f4)
+    md.text((1870 * S - b4[2], -10 * S), "4%", font=f4, fill=255)
+    g = np.clip((yy - 80 * S) / (520 * S), 0, 1)[..., None]
+    col = np.array([255, 120, 138], np.float32) * (1 - g) + np.array([214, 30, 62], np.float32) * g
+    t4 = np.zeros((Ht, Wt, 4), np.uint8)
+    t4[..., :3] = col.astype("uint8")
+    t4[..., 3] = np.asarray(m4)
+    t4 = Image.fromarray(t4, "RGBA")
+    img.alpha_composite(_glow(t4, 44 * S, 0.9))
+    img.alpha_composite(t4)
+    return img.resize((1920, 1080), Image.LANCZOS)
+
+
 def variant_c():
     """Versus: panic seller vs patient investor."""
     img = base()
@@ -270,11 +338,11 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     outs = []
     variants = (("thumbnail.jpg", variant_a), ("thumbnail_b.jpg", variant_b), ("thumbnail_c.jpg", variant_c),
-                ("thumbnail_v4.jpg", variant_v4))
+                ("thumbnail_v4.jpg", variant_v4), ("thumbnail_v5.jpg", variant_v5))
     only = sys.argv[1:]
     for name, fn in [v for v in variants if not only or v[0].split(".")[0].split("_")[-1] in only]:
         p = os.path.join(OUT, name)
-        size = (1920, 1080) if name == "thumbnail_v4.jpg" else (1280, 720)
+        size = (1920, 1080) if name in ("thumbnail_v4.jpg", "thumbnail_v5.jpg") else (1280, 720)
         fn().convert("RGB").resize(size, Image.LANCZOS).save(p, quality=93)
         outs.append(p)
     print("\n".join(outs))

@@ -9,7 +9,10 @@ import re
 import sys
 import wave
 
-from script_v3 import SEGMENTS, CHUNK_STARTS
+import importlib
+_SCRIPT = importlib.import_module(os.environ.get("SCRIPT_MODULE", "script_v3"))
+SEGMENTS = _SCRIPT.SEGMENTS
+CHUNK_STARTS = _SCRIPT.CHUNK_STARTS
 from tts import synth, api_key
 import tts as T
 
