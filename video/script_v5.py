@@ -175,7 +175,7 @@ SEGMENTS = [
 
     # =========================================================== 4 · THE AI MARKET
     S("Force four: the AI market. The S and P five hundred closed 2025 at six thousand eight hundred and forty-six. @a Last week it hit seven thousand eight hundred and forty-four. Almost fifteen percent higher.",
-      bars([("31 Dec 2025", 6845.5, "6,846", "slate")], maxv=8200), bars([("Record, Oct 2026", 7844.5, "7,844 (+14.6%)", "green")], maxv=8200, at="a"),
+      bars([("31 Dec 2025", 6845.5, "6,846", "slate")], maxv=10000), bars([("Record, Oct 2026", 7844.5, "7,844 (+14.6%)", "green")], maxv=10000, at="a"),
       k=K4, t="S&P 500 in 2026", src=SRC_SPX),
     S("It fell about eight percent when the war began, @a and was back at a record by the fifteenth of April.",
       cards([("28 Feb → 30 Mar", "−8%", "the war sell-off", "red")]),
